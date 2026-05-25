@@ -1,57 +1,22 @@
-# Production compose file for Linux server at 192.168.11.226
+# Production compose for Linux — MySQL and Redis run NATIVELY on the host.
+# All containers use network_mode: host so they reach localhost MySQL/Redis/LiveKit directly.
 #
-# Run:  docker compose -f docker-compose.prod.yml up -d
+# Before starting:
+#   systemctl start mysql redis-server
+#   mysql -u root -e "CREATE DATABASE IF NOT EXISTS vbots; CREATE USER IF NOT EXISTS 'vbots'@'localhost' IDENTIFIED BY 'vbots'; GRANT ALL PRIVILEGES ON vbots.* TO 'vbots'@'localhost'; FLUSH PRIVILEGES;"
 #
-# Network layout:
-#   livekit   → network_mode: host  (binds directly to 192.168.11.226 NIC)
-#   mysql     → Docker bridge, exposed on host:3306
-#   redis     → Docker bridge, exposed on host:6379
-#   api       → Docker bridge, uses service names for mysql/redis,
-#               reaches LiveKit via 192.168.11.226:7880 (host NIC)
-#   worker    → same as api
-#   frontend  → Docker bridge, exposed on host:5173
-#   nginx     → Docker bridge, exposed on host:80
+# Start:
+#   docker-compose -f docker-compose.prod.yml up -d
 
 services:
-  mysql:
-    image: mysql:8.0
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: vbots
-      MYSQL_USER: vbots
-      MYSQL_PASSWORD: vbots
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    volumes:
-      - mysql_data:/var/lib/mysql
-    ports:
-      - "3306:3306"
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    ports:
-      - "6379:6379"           # exposed on host so livekit (host mode) can reach it
-    volumes:
-      - redis_data:/data
 
   livekit:
     image: livekit/livekit-server:latest
     restart: unless-stopped
     command: --config /etc/livekit.yaml
-    # host mode: LiveKit binds directly to 192.168.11.226
-    # All ports (7880, 7881, 5060, 3478, 50000-60000) available without Docker NAT
     network_mode: host
     volumes:
       - ./infra/livekit-prod.yaml:/etc/livekit.yaml
-    depends_on:
-      - redis
 
   api:
     build:
@@ -59,26 +24,10 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: ./backend/.env
-    environment:
-      # Bridge-network services: use Docker service names
-      DATABASE_URL: mysql+aiomysql://vbots:vbots@mysql:3306/vbots?charset=utf8mb4
-      DATABASE_URL_SYNC: mysql+pymysql://vbots:vbots@mysql:3306/vbots?charset=utf8mb4
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
-      # LiveKit is on host network → reach via server LAN IP
-      LIVEKIT_URL: ws://192.168.11.226:7880
-      DEBUG: "false"
-    ports:
-      - "8000:8000"
+    network_mode: host
     volumes:
-      - recordings:/data/recordings
-      - uploads:/data/uploads
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_started
+      - ./backend/data/recordings:/data/recordings
+      - ./backend/data/uploads:/data/uploads
     command: >
       sh -c "python scripts/seed.py &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4"
@@ -89,17 +38,9 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: ./backend/.env
-    environment:
-      DATABASE_URL: mysql+aiomysql://vbots:vbots@mysql:3306/vbots?charset=utf8mb4
-      REDIS_URL: redis://redis:6379/0
-      # LiveKit is on host network → same server LAN IP as above
-      # Worker in Docker → host → LiveKit (host mode) → no cross-subnet, WebRTC works
-      LIVEKIT_URL: ws://192.168.11.226:7880
+    network_mode: host
     volumes:
-      - recordings:/data/recordings
-    depends_on:
-      - api
-      - livekit
+      - ./backend/data/recordings:/data/recordings
     command: python worker/agent.py start
 
   celery-worker:
@@ -108,14 +49,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: ./backend/.env
-    environment:
-      DATABASE_URL: mysql+aiomysql://vbots:vbots@mysql:3306/vbots?charset=utf8mb4
-      DATABASE_URL_SYNC: mysql+pymysql://vbots:vbots@mysql:3306/vbots?charset=utf8mb4
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
-    depends_on:
-      - api
-      - redis
+    network_mode: host
     command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4
 
   celery-beat:
@@ -124,36 +58,5 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: ./backend/.env
-    environment:
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
-    depends_on:
-      - celery-worker
+    network_mode: host
     command: celery -A app.tasks.celery_app beat --loglevel=info
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    ports:
-      - "5173:80"
-    depends_on:
-      - api
-
-  nginx:
-    image: nginx:alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    volumes:
-      - ./infra/nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - api
-      - frontend
-
-volumes:
-  mysql_data:
-  redis_data:
-  recordings:
-  uploads:
