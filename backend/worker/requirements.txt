@@ -1,0 +1,5 @@
+# Worker-specific LiveKit dependencies — install in addition to backend/requirements.txt
+# pip install -r backend/requirements.txt -r backend/worker/requirements.txt
+livekit-agents[silero]>=1.5,<2.0
+livekit-plugins-openai>=1.5,<2.0
+livekit-plugins-sarvam>=1.5,<2.0

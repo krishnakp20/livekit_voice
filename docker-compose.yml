@@ -1,0 +1,146 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: vbots
+      MYSQL_USER: vbots
+      MYSQL_PASSWORD: vbots
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --config /etc/livekit.yaml
+    restart: unless-stopped
+    volumes:
+      - ./infra/livekit.yaml:/etc/livekit.yaml
+    # ── PRODUCTION (Linux 192.168.10.30): uncomment network_mode, remove ports ──
+    # network_mode: host
+    # ── DEV / Windows: keep ports mapping ──
+    ports:
+      - "7880:7880"
+      - "7881:7881"           # WebRTC ICE over TCP (fallback when UDP blocked)
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "3478:3478/udp"       # TURN relay UDP
+      - "3478:3478/tcp"       # TURN relay TCP
+      - "5349:5349/tcp"       # TURN relay TLS
+      - "50000-60000:50000-60000/udp"
+    depends_on:
+      - redis
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: mysql+aiomysql://vbots:vbots@mysql:3306/vbots?charset=utf8mb4
+      DATABASE_URL_SYNC: mysql+pymysql://vbots:vbots@mysql:3306/vbots?charset=utf8mb4
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      LIVEKIT_URL: ws://livekit:7880
+    ports:
+      - "8000:8000"
+    volumes:
+      - recordings:/data/recordings
+      - uploads:/data/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    command: >
+      sh -c "python scripts/seed.py &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: mysql+aiomysql://vbots:vbots@mysql:3306/vbots?charset=utf8mb4
+      REDIS_URL: redis://redis:6379/0
+      # Worker inside Docker connects to LiveKit via service name (not LAN IP)
+      LIVEKIT_URL: ws://livekit:7880
+    volumes:
+      - recordings:/data/recordings
+    depends_on:
+      - api
+      - livekit
+    command: python worker/agent.py start
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: mysql+aiomysql://vbots:vbots@mysql:3306/vbots?charset=utf8mb4
+      DATABASE_URL_SYNC: mysql+pymysql://vbots:vbots@mysql:3306/vbots?charset=utf8mb4
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    depends_on:
+      - api
+      - redis
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    depends_on:
+      - celery-worker
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+      - frontend
+
+volumes:
+  mysql_data:
+  redis_data:
+  recordings:
+  uploads:

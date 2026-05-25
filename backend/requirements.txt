@@ -1,0 +1,44 @@
+# Core
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.18
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# Database (MySQL)
+sqlalchemy[asyncio]==2.0.36
+aiomysql==0.2.0
+pymysql==1.1.1
+cryptography==44.0.0
+alembic==1.14.0
+greenlet==3.1.1
+
+# Auth & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.2.1
+
+# Redis & Celery
+redis==5.2.1
+celery==5.4.0
+
+# LiveKit
+livekit-api==0.8.1
+# Agent worker (also needs: livekit-agents, livekit-plugins-openai, livekit-plugins-sarvam, livekit-plugins-silero)
+# These are pinned separately because the worker uses a different pip install path.
+# See worker/Dockerfile or install manually:
+#   pip install "livekit-agents[silero]>=1.5" livekit-plugins-openai livekit-plugins-sarvam
+
+# AI Providers
+openai==1.57.4
+httpx==0.28.1
+
+# WebSocket
+python-socketio==5.12.1
+websockets==14.1
+
+# Utils
+python-dateutil==2.9.0.post0
+aiofiles==24.1.0
+email-validator==2.2.0
+orjson==3.10.12

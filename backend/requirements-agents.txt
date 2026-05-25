@@ -1,0 +1,8 @@
+# LiveKit voice worker — install in backend venv:
+#   pip install -r requirements-agents.txt
+#
+# 1.5.x adds AgentSession.start(record=...) and ctx.session_directory/audio.ogg
+livekit-agents==1.5.12
+livekit-plugins-openai==1.5.12
+livekit-plugins-sarvam==1.5.12
+livekit-plugins-silero==1.5.12

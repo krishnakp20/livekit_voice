@@ -1,0 +1,36 @@
+port: 7880
+bind_addresses:
+  - ""
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  use_external_ip: false
+  # LAN IP of this server — must be reachable from agent workers and SIP dialer
+  # Production (Linux): use network_mode: host in docker-compose so this IP is directly bound
+  node_ip: 192.168.10.30
+
+# API keys: key_name → secret  (must match LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env)
+keys:
+  APIvoicebot: fH5peaazU12TecaePcKTdvVosN7LtoKouiuuFewSEfxM
+
+redis:
+  address: redis:6379
+
+sip:
+  enabled: true
+  # Listens on UDP+TCP 5060 by default — expose both in docker-compose
+
+# TURN relay — lets agent workers reach LiveKit even when UDP 50000-60000 is blocked
+# (e.g. worker on different subnet / Windows dev machine → Linux LiveKit server)
+# Uses TCP:3478 and UDP:3478 — expose these ports in docker-compose
+turn:
+  enabled: true
+  domain: 192.168.10.30
+  tls_port: 5349
+  udp_port: 3478
+  external_tls: false
+
+logging:
+  level: info

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.egg-info/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+*.local
+
+# Data
+/data/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Docker
+.docker/
+
+# Recordings
+recordings/
