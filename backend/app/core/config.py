@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     DEFAULT_LLM_MODEL: str = "gpt-4o-mini"
 
     # Storage
-    RECORDINGS_PATH: str = "data/recordings"
+    RECORDINGS_PATH: str = "/data/recordings"
     # Optional fallback only — normal recordings use AgentSession.start(record=...)
     LIVEKIT_EGRESS_RECORDING: bool = False
     LIVEKIT_EGRESS_OUTPUT_DIR: str = ""
