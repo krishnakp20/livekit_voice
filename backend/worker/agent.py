@@ -64,8 +64,8 @@ logger = logging.getLogger("vbots.agent")
 def prewarm(proc: JobProcess) -> None:
     # Silero owns turn boundaries; Sarvam STT uses high_vad_sensitivity=False (see DynamicVoiceAgent)
     proc.userdata["vad"] = silero.VAD.load(
-        min_silence_duration=0.42,
-        prefix_padding_duration=0.35,
+        min_silence_duration=0.28,
+        prefix_padding_duration=0.2,
     )
 
 
@@ -95,10 +95,13 @@ class DynamicVoiceAgent(Agent):
         reply_tokens = min(int(config.max_tokens), settings.AGENT_REPLY_MAX_TOKENS)
         phone_prompt = (
             f"{config.prompt}\n\n"
-            "Phone call rules: reply in 1–2 short Hindi/Hinglish sentences only. "
-            "No long lists. Ask one clarifying question at a time. "
-            "If the caller asks for flights or tickets (e.g. Delhi to Mumbai), help with travel — "
-            "do not assume property leasing unless they clearly ask for rent/lease."
+            "PHONE CALL RULES (strict):\n"
+            "- Reply in MAX 1 sentence (10-15 words). Never longer.\n"
+            "- Sound natural and warm, like a real person.\n"
+            "- Ask only ONE question at a time.\n"
+            "- No lists, no bullet points, no long explanations.\n"
+            "- Use Hinglish naturally (mix Hindi + English words).\n"
+            "- If you need a moment, say 'Hmm' or 'Achha' before replying."
         )
         llm = openai.LLM(
             model=config.model or settings.DEFAULT_LLM_MODEL,
