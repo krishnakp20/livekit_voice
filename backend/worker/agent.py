@@ -39,6 +39,17 @@ except ModuleNotFoundError:
     )
     raise SystemExit(1)
 from livekit.plugins import openai, sarvam, silero
+try:
+    from livekit.plugins import groq as groq_plugin
+    _GROQ_AVAILABLE = True
+except ImportError:
+    _GROQ_AVAILABLE = False
+
+try:
+    from livekit.plugins import deepgram as deepgram_plugin
+    _DEEPGRAM_AVAILABLE = True
+except ImportError:
+    _DEEPGRAM_AVAILABLE = False
 
 from app.core.config import settings
 from app.services.recording_service import recording_path_for_room
@@ -64,8 +75,8 @@ logger = logging.getLogger("vbots.agent")
 def prewarm(proc: JobProcess) -> None:
     # Silero owns turn boundaries; Sarvam STT uses high_vad_sensitivity=False (see DynamicVoiceAgent)
     proc.userdata["vad"] = silero.VAD.load(
-        min_silence_duration=0.28,
-        prefix_padding_duration=0.2,
+        min_silence_duration=0.20,
+        prefix_padding_duration=0.15,
     )
 
 
@@ -79,8 +90,17 @@ class DynamicVoiceAgent(Agent):
         lang_code = language_to_sarvam_code(config.language)
         use_sarvam = config.provider == AIProvider.SARVAM
 
-        stt = (
-            sarvam.STT(
+        deepgram_key = os.getenv("DEEPGRAM_API_KEY", "")
+        if _DEEPGRAM_AVAILABLE and deepgram_key:
+            # Streaming STT — processes audio while user speaks (stt_wait ≈ 0)
+            stt = deepgram_plugin.STT(
+                model="nova-2",
+                language="hi",        # Hindi; use "hi-en" for Hinglish
+                smart_format=True,
+                punctuate=True,
+            )
+        elif use_sarvam:
+            stt = sarvam.STT(
                 language=lang_code,
                 model=settings.AGENT_STT_MODEL,
                 mode="transcribe",
@@ -88,9 +108,8 @@ class DynamicVoiceAgent(Agent):
                 sample_rate=settings.AGENT_AUDIO_SAMPLE_RATE,
                 prompt=settings.AGENT_STT_PROMPT,
             )
-            if use_sarvam
-            else openai.STT()
-        )
+        else:
+            stt = openai.STT()
 
         reply_tokens = min(int(config.max_tokens), settings.AGENT_REPLY_MAX_TOKENS)
         phone_prompt = (
@@ -103,11 +122,19 @@ class DynamicVoiceAgent(Agent):
             "- Use Hinglish naturally (mix Hindi + English words).\n"
             "- If you need a moment, say 'Hmm' or 'Achha' before replying."
         )
-        llm = openai.LLM(
-            model=config.model or settings.DEFAULT_LLM_MODEL,
-            temperature=float(config.temperature),
-            max_completion_tokens=reply_tokens,
-        )
+        groq_key = os.getenv("GROQ_API_KEY", "")
+        if _GROQ_AVAILABLE and groq_key:
+            llm = groq_plugin.LLM(
+                model="llama-3.3-70b-versatile",
+                temperature=float(config.temperature),
+                max_tokens=reply_tokens,
+            )
+        else:
+            llm = openai.LLM(
+                model=config.model or settings.DEFAULT_LLM_MODEL,
+                temperature=float(config.temperature),
+                max_completion_tokens=reply_tokens,
+            )
 
         tts = (
             sarvam.TTS(
