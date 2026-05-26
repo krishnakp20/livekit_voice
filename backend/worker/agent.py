@@ -94,11 +94,12 @@ class DynamicVoiceAgent(Agent):
         if _DEEPGRAM_AVAILABLE and deepgram_key:
             # Streaming STT — processes audio while user speaks (stt_wait ≈ 0)
             stt = deepgram_plugin.STT(
-                model="nova-2",
-                language="hi",        # Hindi; use "hi-en" for Hinglish
+                model="nova",
+                language="hi-Latn",   # Hinglish: Hindi in Latin/Roman script (code-switched)
                 smart_format=True,
                 punctuate=True,
             )
+            logger.info("STT: Deepgram nova (streaming, hi-Latn Hinglish)")
         elif use_sarvam:
             stt = sarvam.STT(
                 language=lang_code,
@@ -108,8 +109,10 @@ class DynamicVoiceAgent(Agent):
                 sample_rate=settings.AGENT_AUDIO_SAMPLE_RATE,
                 prompt=settings.AGENT_STT_PROMPT,
             )
+            logger.info("STT: Sarvam %s (batch)", settings.AGENT_STT_MODEL)
         else:
             stt = openai.STT()
+            logger.info("STT: OpenAI Whisper")
 
         reply_tokens = min(int(config.max_tokens), settings.AGENT_REPLY_MAX_TOKENS)
         phone_prompt = (
@@ -127,13 +130,21 @@ class DynamicVoiceAgent(Agent):
             llm = groq_plugin.LLM(
                 model="llama-3.3-70b-versatile",
                 temperature=float(config.temperature),
-                max_tokens=reply_tokens,
+                max_completion_tokens=reply_tokens,
             )
+            logger.info("LLM: Groq llama-3.3-70b-versatile (max_tokens=%d)", reply_tokens)
         else:
             llm = openai.LLM(
                 model=config.model or settings.DEFAULT_LLM_MODEL,
                 temperature=float(config.temperature),
                 max_completion_tokens=reply_tokens,
+            )
+            logger.info(
+                "LLM: OpenAI %s (max_tokens=%d) [groq_available=%s, groq_key=%s]",
+                config.model or settings.DEFAULT_LLM_MODEL,
+                reply_tokens,
+                _GROQ_AVAILABLE,
+                bool(groq_key),
             )
 
         tts = (
