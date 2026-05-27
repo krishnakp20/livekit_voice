@@ -62,6 +62,7 @@ async def create_trunk(data: SIPTrunkCreate, db: DbSession, current_user: AdminU
         logger.error("LiveKit trunk NOT created for %r: %s — sync manually after fixing.", data.name, e)
         trunk.status = TrunkStatus.INACTIVE
 
+    await db.flush()  # persist livekit_trunk_id + status before refresh
     await db.refresh(trunk)
     return trunk
 
