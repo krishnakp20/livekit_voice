@@ -84,7 +84,7 @@ export const uploadLeads = (file: File, campaignId?: number) => {
   form.append("file", file);
   return api.post("/leads/upload", form, {
     params: campaignId ? { campaign_id: campaignId } : {},
-    headers: { "Content-Type": "multipart/form-data" },
+    // Do NOT set Content-Type manually — browser must set it with boundary
   });
 };
 

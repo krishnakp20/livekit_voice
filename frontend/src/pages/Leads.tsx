@@ -28,14 +28,20 @@ export default function Leads() {
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!campaignId) {
-      alert("Select a campaign first — leads must belong to a campaign to be dialed.");
-      return;
+    try {
+      const cid = campaignId === "" ? undefined : Number(campaignId);
+      const res = await uploadLeads(file, cid);
+      alert(`✅ Imported ${res.data.imported} leads successfully!`);
+      load();
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        (err as Error)?.message ||
+        "Upload failed";
+      alert(`❌ Upload failed: ${msg}`);
+    } finally {
+      if (fileRef.current) fileRef.current.value = "";
     }
-    const res = await uploadLeads(file, Number(campaignId));
-    alert(`Imported ${res.data.imported} leads`);
-    load();
-    if (fileRef.current) fileRef.current.value = "";
   };
 
   return (
@@ -72,8 +78,8 @@ export default function Leads() {
       <Card className="mb-4">
         <CardContent className="py-3 text-sm text-slate-600">
           CSV columns: <span className="font-mono">phone</span> (required),{" "}
-          <span className="font-mono">name</span>, <span className="font-mono">email</span> (optional).
-          Select a campaign before upload.
+          <span className="font-mono">name</span>, <span className="font-mono">email</span> (optional).{" "}
+          Campaign select karo to assign leads — ya bina campaign ke bhi upload kar sakte ho.
         </CardContent>
       </Card>
 

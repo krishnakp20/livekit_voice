@@ -268,6 +268,7 @@ async def finalize_call_log(room_name: str, *, failed: bool = False) -> None:
         from sqlalchemy import select
 
         from app.db.models.call_log import CallLog, CallStatus
+        from app.db.models.campaign import Campaign, Lead, LeadStatus
         from app.db.session import AsyncSessionLocal
         from app.websocket.manager import socket_manager
         from worker.call_tracking import refresh_call_sentiment_from_db
@@ -293,6 +294,34 @@ async def finalize_call_log(room_name: str, *, failed: bool = False) -> None:
                 if started.tzinfo is None:
                     started = started.replace(tzinfo=timezone.utc)
                 call.duration_seconds = max(0, int((now - started).total_seconds()))
+
+            # ── Update lead status if this call was part of a campaign ──────────
+            if call.lead_id:
+                lead_result = await db.execute(select(Lead).where(Lead.id == call.lead_id))
+                lead = lead_result.scalar_one_or_none()
+                if lead and lead.status == LeadStatus.DIALING:
+                    lead.last_called_at = now
+                    call_answered = (not failed) and (call.duration_seconds or 0) > 5
+
+                    if call_answered:
+                        lead.status = LeadStatus.CONNECTED
+                        logger.info("Lead %s → CONNECTED (call_id=%s duration=%ss)", lead.id, call.id, call.duration_seconds)
+                    else:
+                        lead.retry_count += 1
+                        max_retries = 3
+                        if lead.campaign_id:
+                            camp_result = await db.execute(select(Campaign).where(Campaign.id == lead.campaign_id))
+                            camp = camp_result.scalar_one_or_none()
+                            if camp:
+                                max_retries = camp.max_retries
+
+                        if lead.retry_count >= max_retries:
+                            lead.status = LeadStatus.NO_ANSWER if not failed else LeadStatus.FAILED
+                            logger.info("Lead %s → %s (retries=%s/%s)", lead.id, lead.status, lead.retry_count, max_retries)
+                        else:
+                            lead.status = LeadStatus.NEW  # back to NEW for retry
+                            logger.info("Lead %s → NEW for retry (attempt %s/%s)", lead.id, lead.retry_count, max_retries)
+
             await db.commit()
 
             call_id = call.id
