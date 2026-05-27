@@ -31,7 +31,11 @@ export default function Leads() {
     try {
       const cid = campaignId === "" ? undefined : Number(campaignId);
       const res = await uploadLeads(file, cid);
-      alert(`✅ Imported ${res.data.imported} leads successfully!`);
+      const skipped = res.data.skipped_duplicates ?? 0;
+      const msg = skipped > 0
+        ? `✅ Imported ${res.data.imported} leads. Skipped ${skipped} duplicates.`
+        : `✅ Imported ${res.data.imported} leads successfully!`;
+      alert(msg);
       load();
     } catch (err: unknown) {
       const msg =

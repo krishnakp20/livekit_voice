@@ -82,10 +82,19 @@ async def dial_campaign_leads(
     trunk_id = await get_outbound_livekit_trunk_id(db, campaign.client_id)
     dialed = 0
     errors: list[str] = []
+    seen_phones: set[str] = set()
 
     for lead in leads:
         phone = format_phone_for_sip(lead.phone)
         safe_phone = re.sub(r"\D", "", phone)
+
+        if safe_phone in seen_phones:
+            logger.warning(
+                "Campaign %s: skipping duplicate phone %s (lead_id=%s) in this batch",
+                campaign_id, safe_phone, lead.id,
+            )
+            continue
+        seen_phones.add(safe_phone)
         # UUID suffix prevents collision when same number is retried or in multiple campaigns
         room_name = f"outbound-{campaign.agent_id}-{safe_phone}-{uuid.uuid4().hex[:8]}"
 

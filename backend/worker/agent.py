@@ -483,7 +483,7 @@ async def entrypoint(ctx: JobContext):
     if is_outbound_room:
         expected = sip_participant_identity(caller_number) if caller_number else None
         logger.info(
-            "Outbound: waiting for callee to answer (expected_identity=%s, timeout=60s)",
+            "Outbound: waiting for SIP participant to join room (expected_identity=%s, timeout=60s)",
             expected,
         )
         try:
@@ -491,15 +491,109 @@ async def entrypoint(ctx: JobContext):
                 ctx.wait_for_participant(identity=expected) if expected else ctx.wait_for_participant(),
                 timeout=60.0,
             )
-            sip_identity = participant.identity
-            callee_answered["value"] = True  # callee picked up
-            logger.info("Outbound: callee connected identity=%s", sip_identity)
         except asyncio.TimeoutError:
             logger.error(
                 "Outbound: callee did not join within 60s room=%s — phone may not have rung or was declined",
                 room_name,
             )
             return
+
+        sip_identity = participant.identity
+        logger.info(
+            "Outbound: SIP participant joined room identity=%s (checking answer status...)",
+            sip_identity,
+        )
+
+        # ── Detect actual callee answer via sip.callStatus attribute ──────────────
+        # LiveKit adds the SIP participant to the room the moment the outbound dial
+        # is initiated (ringing phase), NOT when the callee picks up.
+        # wait_for_participant() therefore returns immediately for every outbound room.
+        # We must wait for participant attribute sip.callStatus == "active" which
+        # LiveKit sets only after SIP 200 OK (callee answered).
+        #
+        # Fallback: if sip.callStatus is absent (older LiveKit), we assume answered
+        # to preserve backward compatibility.
+        call_active_event = asyncio.Event()
+
+        def _check_sip_status(attrs: dict) -> None:
+            status = attrs.get("sip.callStatus", "")
+            if status:
+                logger.info("Outbound: sip.callStatus=%r identity=%s", status, sip_identity)
+            if status == "active":
+                call_active_event.set()
+
+        def _on_sip_attrs(changed_attrs: dict, p) -> None:
+            if p.identity == sip_identity:
+                merged = {**(dict(p.attributes) if p.attributes else {}), **changed_attrs}
+                _check_sip_status(merged)
+
+        # Register listener BEFORE reading current attrs (avoids race condition)
+        ctx.room.on("participant_attributes_changed", _on_sip_attrs)
+
+        current_attrs: dict = {}
+        try:
+            if hasattr(participant, "attributes") and participant.attributes:
+                current_attrs = dict(participant.attributes)
+        except Exception:
+            pass
+        logger.info("Outbound: initial participant attributes=%s", current_attrs)
+
+        if "sip.callStatus" not in current_attrs:
+            # Attributes may arrive asynchronously — wait up to 3 s for first delivery
+            try:
+                await asyncio.wait_for(call_active_event.wait(), timeout=3.0)
+            except asyncio.TimeoutError:
+                pass  # no attributes yet; will re-check below
+
+            if not call_active_event.is_set():
+                # Re-fetch after brief wait
+                try:
+                    if hasattr(participant, "attributes") and participant.attributes:
+                        current_attrs = dict(participant.attributes)
+                except Exception:
+                    pass
+
+            if "sip.callStatus" not in current_attrs and not call_active_event.is_set():
+                # Old LiveKit without SIP attribute support — fall back to original behavior
+                logger.warning(
+                    "Outbound: sip.callStatus attribute not present — assuming answered "
+                    "(upgrade LiveKit SIP >= 1.7 for accurate answered detection)"
+                )
+                callee_answered["value"] = True
+        else:
+            _check_sip_status(current_attrs)
+
+        if not call_active_event.is_set() and not callee_answered["value"]:
+            # Wait for sip.callStatus == "active" (remaining time from 60 s budget)
+            try:
+                await asyncio.wait_for(call_active_event.wait(), timeout=55.0)
+            except asyncio.TimeoutError:
+                logger.info(
+                    "Outbound: callee did not answer (sip.callStatus never active) room=%s",
+                    room_name,
+                )
+            finally:
+                try:
+                    ctx.room.off("participant_attributes_changed", _on_sip_attrs)
+                except Exception:
+                    pass
+
+            if not call_active_event.is_set():
+                # Not answered — shutdown callback will mark lead NO_ANSWER / retry
+                return
+        else:
+            try:
+                ctx.room.off("participant_attributes_changed", _on_sip_attrs)
+            except Exception:
+                pass
+
+        if call_active_event.is_set():
+            callee_answered["value"] = True
+            logger.info(
+                "Outbound: callee answered (sip.callStatus=active) identity=%s",
+                sip_identity,
+            )
+
     elif caller_number:
         sip_identity = sip_participant_identity(caller_number)
     telephony_hz = settings.AGENT_AUDIO_SAMPLE_RATE

@@ -45,18 +45,32 @@ async def upload_leads(
     content = await file.read()
     reader = csv.DictReader(io.StringIO(content.decode("utf-8")))
     count = 0
+    skipped = 0
+
+    # Load existing phones for this campaign to skip duplicates
+    existing_query = select(Lead.phone).where(Lead.client_id == current_user.client_id)
+    if campaign_id:
+        existing_query = existing_query.where(Lead.campaign_id == campaign_id)
+    existing_result = await db.execute(existing_query)
+    existing_phones: set[str] = {row[0] for row in existing_result.all()}
+
     for row in reader:
         phone = row.get("phone") or row.get("Phone") or row.get("PHONE")
         if not phone:
             continue
+        phone = phone.strip()
+        if phone in existing_phones:
+            skipped += 1
+            continue
         lead = Lead(
             client_id=current_user.client_id,
             campaign_id=campaign_id,
-            phone=phone.strip(),
+            phone=phone,
             name=row.get("name") or row.get("Name"),
             email=row.get("email") or row.get("Email"),
         )
         db.add(lead)
+        existing_phones.add(phone)  # prevent in-batch duplicates too
         count += 1
     await db.flush()
-    return {"imported": count}
+    return {"imported": count, "skipped_duplicates": skipped}
