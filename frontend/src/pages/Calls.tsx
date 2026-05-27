@@ -15,6 +15,7 @@ interface CallRow {
   id: number;
   direction: string;
   caller_number: string | null;
+  callee_number: string | null;
   duration_seconds: number | null;
   status: string;
   sentiment_score: number | null;
@@ -22,6 +23,25 @@ interface CallRow {
   has_recording: boolean;
   recording_url: string | null;
   transcripts?: TranscriptEntry[];
+}
+
+function displayNumber(c: CallRow): string {
+  if (c.direction === "outbound") return c.callee_number || c.caller_number || "—";
+  return c.caller_number || c.callee_number || "—";
+}
+
+function formatDateTime(iso: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
 }
 
 function sentimentLabel(score: number | null) {
@@ -111,7 +131,9 @@ export default function Calls() {
               <thead className="bg-slate-50 border-b">
                 <tr>
                   <th className="text-left px-4 py-3">ID</th>
-                  <th className="text-left px-4 py-3">Caller</th>
+                  <th className="text-left px-4 py-3">Date & Time</th>
+                  <th className="text-left px-4 py-3">Number</th>
+                  <th className="text-left px-4 py-3">Direction</th>
                   <th className="text-left px-4 py-3">Duration</th>
                   <th className="text-left px-4 py-3">Status</th>
                   <th className="text-left px-4 py-3">Sentiment</th>
@@ -135,7 +157,17 @@ export default function Calls() {
                     }`}
                   >
                     <td className="px-4 py-3">#{c.id}</td>
-                    <td className="px-4 py-3 font-mono">{c.caller_number || "—"}</td>
+                    <td className="px-4 py-3 text-slate-600 text-xs">{formatDateTime(c.started_at)}</td>
+                    <td className="px-4 py-3 font-mono">{displayNumber(c)}</td>
+                    <td className="px-4 py-3">
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                        c.direction === "outbound"
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-green-100 text-green-700"
+                      }`}>
+                        {c.direction === "outbound" ? "↑ Out" : "↓ In"}
+                      </span>
+                    </td>
                     <td className="px-4 py-3">{c.duration_seconds ? `${c.duration_seconds}s` : "—"}</td>
                     <td className="px-4 py-3">
                       <Badge status={c.status} />
@@ -164,8 +196,26 @@ export default function Calls() {
               <>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <span className="text-slate-500">Caller</span>
-                    <p className="font-mono">{detail.caller_number || "—"}</p>
+                    <span className="text-slate-500">{detail.direction === "outbound" ? "Called" : "Caller"}</span>
+                    <p className="font-mono">{displayNumber(detail)}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Date & Time</span>
+                    <p className="text-xs">{formatDateTime(detail.started_at)}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-slate-500">Direction</span>
+                    <p>
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                        detail.direction === "outbound"
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-green-100 text-green-700"
+                      }`}>
+                        {detail.direction === "outbound" ? "↑ Outbound" : "↓ Inbound"}
+                      </span>
+                    </p>
                   </div>
                   <div>
                     <span className="text-slate-500">Sentiment</span>
