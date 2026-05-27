@@ -260,7 +260,7 @@ async def create_call_log(
         return None
 
 
-async def finalize_call_log(room_name: str, *, failed: bool = False) -> None:
+async def finalize_call_log(room_name: str, *, failed: bool = False, callee_answered: bool = True) -> None:
     """Mark call completed/failed when LiveKit room ends."""
     try:
         from datetime import datetime, timezone
@@ -287,6 +287,8 @@ async def finalize_call_log(room_name: str, *, failed: bool = False) -> None:
                 return
 
             now = datetime.now(timezone.utc)
+            # Capture whether callee actually answered BEFORE changing status
+            was_active = call.status == CallStatus.ACTIVE
             call.status = CallStatus.FAILED if failed else CallStatus.COMPLETED
             call.ended_at = now
             started = call.started_at
@@ -301,7 +303,9 @@ async def finalize_call_log(room_name: str, *, failed: bool = False) -> None:
                 lead = lead_result.scalar_one_or_none()
                 if lead and lead.status == LeadStatus.DIALING:
                     lead.last_called_at = now
-                    call_answered = (not failed) and (call.duration_seconds or 0) > 5
+                    # callee_answered=True only when wait_for_participant() succeeded (outbound)
+                    # or always True for inbound (caller was already in room)
+                    call_answered = callee_answered and not failed
 
                     if call_answered:
                         lead.status = LeadStatus.CONNECTED
@@ -415,9 +419,16 @@ async def entrypoint(ctx: JobContext):
     )
 
     session_failed = {"value": False}
+    # Inbound: caller is already in room → always answered
+    # Outbound: only True after wait_for_participant() succeeds (callee picks up)
+    callee_answered = {"value": not is_outbound_room}
 
     async def _on_call_end(_: str = "") -> None:
-        await finalize_call_log(ctx.room.name, failed=session_failed["value"])
+        await finalize_call_log(
+            ctx.room.name,
+            failed=session_failed["value"],
+            callee_answered=callee_answered["value"],
+        )
 
     ctx.add_shutdown_callback(_on_call_end)
 
@@ -481,6 +492,7 @@ async def entrypoint(ctx: JobContext):
                 timeout=60.0,
             )
             sip_identity = participant.identity
+            callee_answered["value"] = True  # callee picked up
             logger.info("Outbound: callee connected identity=%s", sip_identity)
         except asyncio.TimeoutError:
             logger.error(
