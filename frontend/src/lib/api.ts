@@ -84,7 +84,9 @@ export const uploadLeads = (file: File, campaignId?: number) => {
   form.append("file", file);
   return api.post("/leads/upload", form, {
     params: campaignId ? { campaign_id: campaignId } : {},
-    // Do NOT set Content-Type manually — browser must set it with boundary
+    // Override the instance-level "application/json" default so axios can auto-set
+    // "multipart/form-data; boundary=..." from the FormData body.
+    headers: { "Content-Type": undefined },
   });
 };
 
