@@ -93,18 +93,20 @@ class DynamicVoiceAgent(Agent):
         deepgram_key = os.getenv("DEEPGRAM_API_KEY", "")
         if _DEEPGRAM_AVAILABLE and deepgram_key:
             # Streaming STT — processes audio while user speaks (stt_wait ≈ 0)
-            # endpointing=200: Deepgram sends is_final after 200 ms of silence (default ~1000ms)
-            #   → cuts stt_wait dead air from ~1.35s to near-zero
-            # no_delay=True: disable Deepgram's internal pacing delay for faster finals
+            # endpointing_ms=100: Deepgram sends is_final after 100ms silence (plugin default=25ms,
+            #   but 25ms is too aggressive on SIP — causes mid-sentence finalization)
+            # sample_rate=8000: must match PSTN/SIP 8kHz narrowband audio
+            # no_delay=True: don't wait for smart_format sequences before emitting finals
             stt = deepgram_plugin.STT(
-                model="nova-2",
+                model="nova",
                 language="hi-Latn",   # Hinglish: Hindi in Latin/Roman script (code-switched)
                 smart_format=True,
                 punctuate=True,
-                endpointing=200,
+                sample_rate=8000,
+                endpointing_ms=100,
                 no_delay=True,
             )
-            logger.info("STT: Deepgram nova-2 (streaming, hi-Latn Hinglish, endpointing=200ms)")
+            logger.info("STT: Deepgram nova (streaming, hi-Latn Hinglish, 8kHz, endpointing=100ms)")
         elif use_sarvam:
             stt = sarvam.STT(
                 language=lang_code,
