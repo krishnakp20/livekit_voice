@@ -31,11 +31,19 @@ export default function Leads() {
     try {
       const cid = campaignId === "" ? undefined : Number(campaignId);
       const res = await uploadLeads(file, cid);
+      const imported = res.data.imported ?? 0;
       const skipped = res.data.skipped_duplicates ?? 0;
-      const msg = skipped > 0
-        ? `✅ Imported ${res.data.imported} leads. Skipped ${skipped} duplicates.`
-        : `✅ Imported ${res.data.imported} leads successfully!`;
-      alert(msg);
+      const invalid = res.data.skipped_invalid ?? 0;
+
+      if (imported === 0 && skipped === 0 && invalid === 0) {
+        alert("⚠️ No leads found in the file. Check that your CSV has a 'phone' column and at least one data row.");
+        return;
+      }
+
+      const parts: string[] = [`✅ Imported ${imported} leads.`];
+      if (skipped > 0) parts.push(`${skipped} duplicates skipped.`);
+      if (invalid > 0) parts.push(`${invalid} rows had invalid/missing phone numbers.`);
+      alert(parts.join(" "));
       load();
     } catch (err: unknown) {
       const msg =
