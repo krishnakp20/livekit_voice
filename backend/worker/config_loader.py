@@ -270,7 +270,11 @@ def language_to_sarvam_code(language: Language) -> str:
     mapping = {
         Language.HINDI: "hi-IN",
         Language.ENGLISH: "en-IN",
-        Language.HINGLISH: "hi-IN",
+        # Hinglish → en-IN: Sarvam bulbul:v3 Indian-English model handles both
+        # English words AND Hindi words (ji, haan, achha, theek hai) naturally.
+        # hi-IN produces heavy Hindi phonetics on English words, which sounds
+        # unnatural when the LLM switches to English mid-call.
+        Language.HINGLISH: "en-IN",
     }
     return mapping.get(language, "hi-IN")
 
