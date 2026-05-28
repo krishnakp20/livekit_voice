@@ -100,9 +100,12 @@ class Settings(BaseSettings):
         "Transcribe what the caller actually said; do not guess unrelated words."
     )
     AGENT_PREEMPTIVE_GENERATION: bool = False
-    # Turn detection: "vad" (silence-only) or "semantic" (LLM end-of-utterance classifier).
-    # "semantic" is robust against SIP background noise that confuses pure VAD silence detection.
-    AGENT_TURN_DETECTION: str = "semantic"
+    # Turn detection mode for AgentSession (livekit-agents v1.5+):
+    #   "stt"  — STT final transcript drives EOU (Deepgram endpointing_ms=100). NOT affected by
+    #            SIP background noise. Fastest + most reliable on noisy phone lines. (recommended)
+    #   "vad"  — Silero VAD silence threshold. Fast but confused by continuous background hiss.
+    #   "realtime_llm" — OpenAI Realtime API only; not used here.
+    AGENT_TURN_DETECTION: str = "stt"
     AGENT_MIN_ENDPOINTING_DELAY: float = 0.30
     # semantic mode decides EOU quickly from content; 1.5 s safety net is enough (was 2.5 s)
     AGENT_MAX_ENDPOINTING_DELAY: float = 1.5

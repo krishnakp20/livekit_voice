@@ -30,6 +30,7 @@ load_dotenv(_ENV_PATH, override=True)
 try:
     from livekit.agents import Agent, AgentSession, JobContext, JobProcess, WorkerOptions, cli
     from livekit.agents.voice import room_io
+    from livekit.agents.voice.turn import TurnHandlingOptions  # v1.5+ non-deprecated API
 except ModuleNotFoundError:
     print(
         "\n[VBots] livekit-agents not installed in this venv.\n"
@@ -462,25 +463,40 @@ async def entrypoint(ctx: JobContext):
         prefix_padding_duration=0.35,
     )
 
-    # ── Turn detection ──────────────────────────────────────────────────────────
-    # "semantic" (default) — LLM-based End-of-Utterance classifier:
-    #   • NOT fooled by SIP background hiss / brief silence gaps in the noise
-    #   • Fixes "bot not respond": previously VAD would loop on noise and never
-    #     declare EOU; LLM reads the transcript and decides "did they finish?"
-    #   • Fixes 17-second anomaly: noisy silence no longer resets VAD countdown
-    #   • Small extra latency (~100-200 ms Groq call) but eliminates multi-second hangs
-    # "vad" (legacy) — purely silence-based; fast but fragile on noisy SIP lines
-    # Override via AGENT_TURN_DETECTION env var.
+    # ── Turn detection ────────────────────────────────────────────────────────
+    # Uses TurnHandlingOptions (v1.5+ non-deprecated API) to avoid the
+    # deprecation-warning bundle and gain finer control.
+    #
+    # AGENT_TURN_DETECTION="stt"  (default / recommended for SIP):
+    #   Deepgram sends is_final after endpointing_ms=100 ms of silence.
+    #   That STT final triggers EOU — completely bypasses Silero VAD for
+    #   end-of-turn decisions, so SIP background noise has no effect.
+    #   Timeline: speech ends → Deepgram final (100 ms) → min_delay (300 ms)
+    #             → agent responds.  Total: ~400 ms from last syllable.
+    #
+    # AGENT_TURN_DETECTION="vad":
+    #   Falls back to Silero silence-threshold approach (sensitive to noise).
+    #
+    # VAD is still passed so it can gate audio-to-STT and handle interruptions.
+    _turn_opts = TurnHandlingOptions(
+        turn_detection=settings.AGENT_TURN_DETECTION,
+        endpointing={
+            "mode": "fixed",
+            "min_delay": settings.AGENT_MIN_ENDPOINTING_DELAY,   # 0.30 s floor
+            "max_delay": settings.AGENT_MAX_ENDPOINTING_DELAY,   # 1.5 s safety net
+        },
+        interruption={
+            "enabled": config.interruptions_enabled,
+            "min_duration": 0.35,
+            "resume_false_interruption": True,
+        },
+        preemptive_generation={
+            "enabled": settings.AGENT_PREEMPTIVE_GENERATION,
+        },
+    )
     session = AgentSession(
         vad=vad,
-        turn_detection=settings.AGENT_TURN_DETECTION,
-        allow_interruptions=config.interruptions_enabled,
-        min_interruption_duration=0.35,
-        min_endpointing_delay=settings.AGENT_MIN_ENDPOINTING_DELAY,   # 0.30 s floor
-        max_endpointing_delay=settings.AGENT_MAX_ENDPOINTING_DELAY,   # 1.5 s safety net
-        min_consecutive_speech_delay=0.06,
-        preemptive_generation=settings.AGENT_PREEMPTIVE_GENERATION,
-        resume_false_interruption=True,
+        turn_handling=_turn_opts,
     )
 
     @session.on("error")
