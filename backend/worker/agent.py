@@ -108,7 +108,7 @@ class DynamicVoiceAgent(Agent):
                 smart_format=True,
                 punctuate=True,
                 sample_rate=8000,
-                endpointing_ms=100,
+                endpointing_ms=60,    # was 100 — send is_final after 60ms silence (saves ~40ms)
                 no_delay=True,
             )
             logger.info("STT: Deepgram nova (streaming, hi-Latn Hinglish, 8kHz, endpointing=100ms)")

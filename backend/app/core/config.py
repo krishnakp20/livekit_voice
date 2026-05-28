@@ -106,7 +106,7 @@ class Settings(BaseSettings):
     #   "vad"  — Silero VAD silence threshold. Fast but confused by continuous background hiss.
     #   "realtime_llm" — OpenAI Realtime API only; not used here.
     AGENT_TURN_DETECTION: str = "stt"
-    AGENT_MIN_ENDPOINTING_DELAY: float = 0.30
+    AGENT_MIN_ENDPOINTING_DELAY: float = 0.20   # was 0.30 — saves 100ms per turn
     # semantic mode decides EOU quickly from content; 1.5 s safety net is enough (was 2.5 s)
     AGENT_MAX_ENDPOINTING_DELAY: float = 1.5
     AGENT_REPLY_MAX_TOKENS: int = 80
