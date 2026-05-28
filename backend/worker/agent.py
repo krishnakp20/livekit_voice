@@ -88,7 +88,7 @@ def prewarm(proc: JobProcess) -> None:
 class DynamicVoiceAgent(Agent):
     """Agent built from ai_agents row (prompt, voice, language, provider)."""
 
-    def __init__(self, config, greeting: str):
+    def __init__(self, config, greeting: str, lead_name: str = ""):
         from app.db.models.ai_agent import AIProvider, Language
         from worker.config_loader import language_to_sarvam_code, voice_to_sarvam_speaker
 
@@ -127,8 +127,17 @@ class DynamicVoiceAgent(Agent):
             logger.info("STT: OpenAI Whisper")
 
         reply_tokens = min(int(config.max_tokens), settings.AGENT_REPLY_MAX_TOKENS)
+
+        # Inject customer name so LLM can use it naturally during the call
+        name_context = (
+            f"\n\nCUSTOMER NAME: {lead_name}. "
+            "Use their name naturally once or twice during the conversation — "
+            "do NOT repeat it every sentence."
+            if lead_name else ""
+        )
+
         phone_prompt = (
-            f"{config.prompt}\n\n"
+            f"{config.prompt}{name_context}\n\n"
             "PHONE CALL RULES (strict):\n"
             "- Reply in MAX 1 sentence (10-15 words). Never longer.\n"
             "- Sound natural and warm, like a real person.\n"
@@ -457,13 +466,17 @@ async def entrypoint(ctx: JobContext):
         logger.error("Agent %s not found or inactive in database", agent_id)
         return
 
+    # Lead name from campaign metadata — used for personalised greeting + LLM context
+    lead_name = (room_meta.get("lead_name") or job_meta.get("lead_name") or "").strip()
+
     logger.info(
-        "Starting agent id=%s name=%s room=%s language=%s voice=%s",
+        "Starting agent id=%s name=%s room=%s language=%s voice=%s lead_name=%r",
         config.id,
         config.name,
         ctx.room.name,
         config.language.value,
         config.voice,
+        lead_name or "(unknown)",
     )
 
     vad = ctx.proc.userdata.get("vad") or silero.VAD.load(
@@ -519,7 +532,19 @@ async def entrypoint(ctx: JobContext):
     if call_id:
         attach_call_listeners(session, call_id, config.client_id)
 
-    voice_agent = DynamicVoiceAgent(config, config.greeting)
+    # Build personalised greeting for outbound calls.
+    # If the stored greeting already has a {name} placeholder use it;
+    # otherwise prepend "Hi {first_name}!" when the lead name is known.
+    greeting = config.greeting
+    if is_outbound_room and lead_name:
+        if "{name}" in greeting:
+            greeting = greeting.replace("{name}", lead_name)
+        else:
+            first_name = lead_name.split()[0]
+            greeting = f"Hi {first_name}! {greeting}"
+        logger.info("Personalised greeting for lead=%r: %r", lead_name, greeting)
+
+    voice_agent = DynamicVoiceAgent(config, greeting, lead_name=lead_name)
 
     from app.services.phone_utils import sip_participant_identity
 

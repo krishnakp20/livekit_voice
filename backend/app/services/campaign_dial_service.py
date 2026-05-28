@@ -103,6 +103,7 @@ async def dial_campaign_leads(
             "client_id": campaign.client_id,
             "campaign_id": campaign.id,
             "lead_id": lead.id,
+            "lead_name": lead.name or "",   # passed to agent for personalised greeting
             "direction": "outbound",
         }
 
