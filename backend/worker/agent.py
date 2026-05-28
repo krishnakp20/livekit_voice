@@ -166,12 +166,14 @@ class DynamicVoiceAgent(Agent):
                     config.voice, tts_model=settings.AGENT_TTS_MODEL
                 ),
                 target_language_code=lang_code,
-                speech_sample_rate=settings.AGENT_AUDIO_SAMPLE_RATE,
+                # Generate at TTS native rate (22050 Hz); LiveKit resamples to 8 kHz for SIP.
+                # Avoids asking the neural model to produce 8 kHz directly (low quality).
+                speech_sample_rate=settings.AGENT_TTS_SAMPLE_RATE,
                 enable_preprocessing=True,
-                pace=1.05,
-                temperature=0.45,
-                pitch=0.04,
-                loudness=1.02,
+                pace=1.0,           # natural speed (was 1.05 — slightly rushed on phone)
+                temperature=0.25,   # consistent pronunciation (was 0.45 — too much variation)
+                pitch=0.0,          # no artificial pitch shift (was 0.04)
+                loudness=1.5,       # louder for phone clarity (was 1.02)
                 max_chunk_length=120,
             )
             if use_sarvam

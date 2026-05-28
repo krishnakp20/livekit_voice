@@ -110,8 +110,12 @@ class Settings(BaseSettings):
     # semantic mode decides EOU quickly from content; 1.5 s safety net is enough (was 2.5 s)
     AGENT_MAX_ENDPOINTING_DELAY: float = 1.5
     AGENT_REPLY_MAX_TOKENS: int = 80
-    # 8 kHz matches typical PSTN/SIP narrowband; use 16000 only if your trunk is wideband
+    # STT / RoomIO sample rate — must match SIP trunk (8 kHz narrowband PSTN)
     AGENT_AUDIO_SAMPLE_RATE: int = 8000
+    # TTS generates at this rate; LiveKit resamples DOWN to AGENT_AUDIO_SAMPLE_RATE for SIP.
+    # Use the TTS model's native rate (22050 Hz) so the neural model produces full-quality audio
+    # before the codec step — better than asking the model to output 8 kHz directly.
+    AGENT_TTS_SAMPLE_RATE: int = 22050
 
     # Auto-close DB rows stuck in ringing/active (Live Calls / dashboard)
     LIVE_CALL_RINGING_MAX_SECONDS: int = 300  # 5 min still ringing → missed
