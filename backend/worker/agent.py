@@ -112,11 +112,11 @@ class DynamicVoiceAgent(Agent):
                 sample_rate=8000,     # MUST stay 8000 — SIP PSTN narrowband
                 endpointing_ms=40,    # 40ms: saves 20ms vs 60ms, safer than 30ms on SIP
                 no_delay=True,
-                # Boost domain-specific words Deepgram mishears on 8kHz SIP
-                # (e.g. "battery"→"butter", "inverter"→"water", "solar"→"seller")
-                keywords=["inverter:3", "battery:3", "solar:2", "hybrid:2",
-                          "UPS:2", "watt:2", "volt:2", "ampere:2",
-                          "warranty:2", "installation:1", "Satvik:3"],
+                # nova-3 uses keyterms (Keyterm Prompting) — no boost weights, just word list
+                # (nova-2 used keywords=["inverter:3",...] — syntax is different)
+                keyterms=["inverter", "battery", "solar", "hybrid",
+                          "UPS", "watt", "volt", "ampere",
+                          "warranty", "installation", "Satvik"],
             )
             logger.info("STT: Deepgram nova-3 (hi-Latn, 8kHz, endpointing=40ms, no smart_format)")
         elif use_sarvam:
