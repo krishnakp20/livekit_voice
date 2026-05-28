@@ -46,11 +46,21 @@ export default function Leads() {
       alert(parts.join(" "));
       load();
     } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        (err as Error)?.message ||
-        "Upload failed";
-      alert(`❌ Upload failed: ${msg}`);
+      // FastAPI can return detail as string OR as array of validation-error objects
+      const detail = (err as any)?.response?.data?.detail;
+      let msg: string;
+      if (typeof detail === "string") {
+        msg = detail;
+      } else if (Array.isArray(detail)) {
+        // e.g. [{loc:[...], msg:"Field required", type:"missing"}, ...]
+        msg = detail.map((e: any) => e.msg ?? JSON.stringify(e)).join("; ");
+      } else if (detail) {
+        msg = JSON.stringify(detail);
+      } else {
+        msg = (err as Error)?.message ?? "Unknown error";
+      }
+      const status = (err as any)?.response?.status;
+      alert(`❌ Upload failed (${status ?? "network error"}): ${msg}`);
     } finally {
       if (fileRef.current) fileRef.current.value = "";
     }
