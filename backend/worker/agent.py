@@ -98,27 +98,26 @@ class DynamicVoiceAgent(Agent):
         deepgram_key = os.getenv("DEEPGRAM_API_KEY", "")
         if _DEEPGRAM_AVAILABLE and deepgram_key:
             # Streaming STT — processes audio while user speaks (stt_wait ≈ 0)
-            # nova-3: latest Deepgram model — better accuracy on Hinglish/accented speech.
-            #   NOTE: if hi-Latn is unsupported on nova-3, revert to model="nova-2".
+            # nova-2: supports hi-Latn (Hinglish) + keywords boost — nova-3 rejects hi-Latn (400).
             # sample_rate=8000: must match PSTN/SIP 8kHz narrowband (DO NOT change to 16000).
             # smart_format=False, punctuate=False: skip post-processing → ~15ms faster finals.
             # endpointing_ms=40: compromise between 60ms (safe) and 30ms (too aggressive for SIP).
             # no_delay=True: emit finals without waiting for smart_format token sequences.
             stt = deepgram_plugin.STT(
-                model="nova-3",
+                model="nova-2",
                 language="hi-Latn",   # Hinglish: Hindi in Latin/Roman script (code-switched)
                 smart_format=False,   # off — saves ~15ms, we don't need formatted numbers in TTS
                 punctuate=False,      # off — LLM adds natural pauses via sentence structure
                 sample_rate=8000,     # MUST stay 8000 — SIP PSTN narrowband
                 endpointing_ms=40,    # 40ms: saves 20ms vs 60ms, safer than 30ms on SIP
                 no_delay=True,
-                # nova-3 uses keyterms (Keyterm Prompting) — no boost weights, just word list
-                # (nova-2 used keywords=["inverter:3",...] — syntax is different)
-                keyterms=["inverter", "battery", "solar", "hybrid",
-                          "UPS", "watt", "volt", "ampere",
-                          "warranty", "installation", "Satvik"],
+                # Boost domain words Deepgram mishears on 8kHz SIP
+                # (e.g. "battery"→"butter", "inverter"→"water", "solar"→"seller")
+                keywords=["inverter:3", "battery:3", "solar:2", "hybrid:2",
+                          "UPS:2", "watt:2", "volt:2", "ampere:2",
+                          "warranty:2", "installation:1", "Satvik:3"],
             )
-            logger.info("STT: Deepgram nova-3 (hi-Latn, 8kHz, endpointing=40ms, no smart_format)")
+            logger.info("STT: Deepgram nova-2 (hi-Latn, 8kHz, endpointing=40ms, no smart_format)")
         elif use_sarvam:
             stt = sarvam.STT(
                 language=lang_code,
