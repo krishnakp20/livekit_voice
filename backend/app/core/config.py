@@ -94,10 +94,15 @@ class Settings(BaseSettings):
     # Sarvam — saaras:v3 + bulbul:v3 match the working vbot agent (clearer STT/TTS on SIP)
     AGENT_STT_MODEL: str = "saaras:v3"
     AGENT_TTS_MODEL: str = "bulbul:v3"
+    # Deepgram uses this hint to bias vocabulary recognition toward domain words.
+    # Keep it short and specific to the actual business/product being supported.
+    # Change this (or override via .env) when you deploy a different agent domain.
     AGENT_STT_PROMPT: str = (
-        "Indian phone call in Hindi or Hinglish. "
-        "Topics: flights, tickets, hotels, travel dates, cities like Delhi Mumbai. "
-        "Transcribe what the caller actually said; do not guess unrelated words."
+        "Indian customer support call in Hindi or Hinglish. "
+        "Topics: inverter, solar inverter, hybrid inverter, battery, UPS, power backup, "
+        "power cut, load, AC, fan, lights, watt, volt, ampere, installation, service, "
+        "repair, warranty, price, model, capacity, kW, kVA. "
+        "Transcribe exactly what the caller said; do not guess unrelated words."
     )
     AGENT_PREEMPTIVE_GENERATION: bool = False
     # Turn detection mode for AgentSession (livekit-agents v1.5+):

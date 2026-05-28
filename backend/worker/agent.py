@@ -135,7 +135,13 @@ class DynamicVoiceAgent(Agent):
             "- Ask only ONE question at a time.\n"
             "- No lists, no bullet points, no long explanations.\n"
             "- Use Hinglish naturally (mix Hindi + English words).\n"
-            "- If you need a moment, say 'Hmm' or 'Achha' before replying."
+            "- If you need a moment, say 'Hmm' or 'Achha' before replying.\n"
+            "- If the caller's message is unclear or garbled, ask them to repeat: "
+            "'Kya aap thoda aur clearly bol sakte hain?'\n"
+            "- NEVER invent topics the caller has not mentioned.\n"
+            "- Stay strictly within the scope of your system prompt above; "
+            "if asked about something outside your role, say 'Iske baare mein main "
+            "aapki madad nahi kar sakta, lekin [relevant team] se baat karein.'"
         )
         groq_key = os.getenv("GROQ_API_KEY", "")
         if _GROQ_AVAILABLE and groq_key:
