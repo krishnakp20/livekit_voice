@@ -98,20 +98,27 @@ class DynamicVoiceAgent(Agent):
         deepgram_key = os.getenv("DEEPGRAM_API_KEY", "")
         if _DEEPGRAM_AVAILABLE and deepgram_key:
             # Streaming STT — processes audio while user speaks (stt_wait ≈ 0)
-            # endpointing_ms=100: Deepgram sends is_final after 100ms silence (plugin default=25ms,
-            #   but 25ms is too aggressive on SIP — causes mid-sentence finalization)
-            # sample_rate=8000: must match PSTN/SIP 8kHz narrowband audio
-            # no_delay=True: don't wait for smart_format sequences before emitting finals
+            # nova-3: latest Deepgram model — better accuracy on Hinglish/accented speech.
+            #   NOTE: if hi-Latn is unsupported on nova-3, revert to model="nova-2".
+            # sample_rate=8000: must match PSTN/SIP 8kHz narrowband (DO NOT change to 16000).
+            # smart_format=False, punctuate=False: skip post-processing → ~15ms faster finals.
+            # endpointing_ms=40: compromise between 60ms (safe) and 30ms (too aggressive for SIP).
+            # no_delay=True: emit finals without waiting for smart_format token sequences.
             stt = deepgram_plugin.STT(
-                model="nova",
+                model="nova-3",
                 language="hi-Latn",   # Hinglish: Hindi in Latin/Roman script (code-switched)
-                smart_format=True,
-                punctuate=True,
-                sample_rate=8000,
-                endpointing_ms=60,    # was 100 — send is_final after 60ms silence (saves ~40ms)
+                smart_format=False,   # off — saves ~15ms, we don't need formatted numbers in TTS
+                punctuate=False,      # off — LLM adds natural pauses via sentence structure
+                sample_rate=8000,     # MUST stay 8000 — SIP PSTN narrowband
+                endpointing_ms=40,    # 40ms: saves 20ms vs 60ms, safer than 30ms on SIP
                 no_delay=True,
+                # Boost domain-specific words Deepgram mishears on 8kHz SIP
+                # (e.g. "battery"→"butter", "inverter"→"water", "solar"→"seller")
+                keywords=["inverter:3", "battery:3", "solar:2", "hybrid:2",
+                          "UPS:2", "watt:2", "volt:2", "ampere:2",
+                          "warranty:2", "installation:1", "Satvik:3"],
             )
-            logger.info("STT: Deepgram nova (streaming, hi-Latn Hinglish, 8kHz, endpointing=100ms)")
+            logger.info("STT: Deepgram nova-3 (hi-Latn, 8kHz, endpointing=40ms, no smart_format)")
         elif use_sarvam:
             stt = sarvam.STT(
                 language=lang_code,
@@ -143,10 +150,11 @@ class DynamicVoiceAgent(Agent):
             "- Sound natural and warm, like a real person.\n"
             "- Ask only ONE question at a time.\n"
             "- No lists, no bullet points, no long explanations.\n"
-            "- LANGUAGE DETECTION (important): Listen to what language the customer uses.\n"
-            "  • If they speak mostly English → reply 100% in natural Indian English.\n"
-            "  • If they speak Hindi or Hinglish → reply in Hinglish (mix Hindi + English).\n"
-            "  • Switch from the very next reply the moment you detect their language.\n"
+            "- LANGUAGE DETECTION (strict rule):\n"
+            "  • If the customer's message has ANY English sentence → immediately reply in English.\n"
+            "  • Once you switch to English, NEVER go back to Hindi/Hinglish for the rest of the call.\n"
+            "  • If they speak only Hindi/Hinglish → reply in Hinglish.\n"
+            "  • Do NOT wait for multiple English turns — switch on the FIRST English sentence.\n"
             "  • Never ask the customer which language they prefer — just follow their lead.\n"
             "- If you need a moment, say 'Hmm' or 'Achha' (Hindi) / 'Sure' or 'Right' (English) before replying.\n"
             "- If the caller's message is unclear or garbled:\n"
@@ -161,11 +169,11 @@ class DynamicVoiceAgent(Agent):
         groq_key = os.getenv("GROQ_API_KEY", "")
         if _GROQ_AVAILABLE and groq_key:
             llm = groq_plugin.LLM(
-                model="llama-3.3-70b-versatile",
+                model="llama-3.1-8b-instant",  # was 70b-versatile — 8b-instant: ~0.1-0.3s ttft
                 temperature=float(config.temperature),
                 max_completion_tokens=reply_tokens,
             )
-            logger.info("LLM: Groq llama-3.3-70b-versatile (max_tokens=%d)", reply_tokens)
+            logger.info("LLM: Groq llama-3.1-8b-instant (max_tokens=%d)", reply_tokens)
         else:
             llm = openai.LLM(
                 model=config.model or settings.DEFAULT_LLM_MODEL,
@@ -195,7 +203,7 @@ class DynamicVoiceAgent(Agent):
                 temperature=0.25,   # consistent pronunciation (was 0.45 — too much variation)
                 pitch=0.0,          # no artificial pitch shift (was 0.04)
                 loudness=1.5,       # louder for phone clarity (was 1.02)
-                max_chunk_length=120,
+                max_chunk_length=60,  # smaller chunks → first audio arrives sooner (was 120)
             )
             if use_sarvam
             else openai.TTS()
@@ -514,7 +522,7 @@ async def entrypoint(ctx: JobContext):
         },
         interruption={
             "enabled": config.interruptions_enabled,
-            "min_duration": 0.35,
+            "min_duration": 0.25,   # was 0.35 — more responsive; VAD still filters SIP noise
             "resume_false_interruption": True,
         },
         preemptive_generation={

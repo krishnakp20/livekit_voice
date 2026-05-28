@@ -111,9 +111,9 @@ class Settings(BaseSettings):
     #   "vad"  — Silero VAD silence threshold. Fast but confused by continuous background hiss.
     #   "realtime_llm" — OpenAI Realtime API only; not used here.
     AGENT_TURN_DETECTION: str = "stt"
-    AGENT_MIN_ENDPOINTING_DELAY: float = 0.20   # was 0.30 — saves 100ms per turn
-    # semantic mode decides EOU quickly from content; 1.5 s safety net is enough (was 2.5 s)
-    AGENT_MAX_ENDPOINTING_DELAY: float = 1.5
+    AGENT_MIN_ENDPOINTING_DELAY: float = 0.10   # was 0.20 — saves another 100ms per turn
+    # 0.80s safety net — catches mid-thought pauses without 1.5s wait (was 1.5s)
+    AGENT_MAX_ENDPOINTING_DELAY: float = 0.80
     AGENT_REPLY_MAX_TOKENS: int = 80
     # STT / RoomIO sample rate — must match SIP trunk (8 kHz narrowband PSTN)
     AGENT_AUDIO_SAMPLE_RATE: int = 8000
