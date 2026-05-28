@@ -52,6 +52,7 @@ try:
 except ImportError:
     _DEEPGRAM_AVAILABLE = False
 
+
 from app.core.config import settings
 from app.services.recording_service import recording_path_for_room
 from worker.config_loader import (
@@ -97,25 +98,21 @@ class DynamicVoiceAgent(Agent):
 
         deepgram_key = os.getenv("DEEPGRAM_API_KEY", "")
         if _DEEPGRAM_AVAILABLE and deepgram_key:
-            # Streaming STT — processes audio while user speaks (stt_wait ≈ 0)
-            # nova-2: supports hi-Latn (Hinglish) + keywords boost — nova-3 rejects hi-Latn (400).
-            # sample_rate=8000: must match PSTN/SIP 8kHz narrowband (DO NOT change to 16000).
-            # smart_format=False, punctuate=False: skip post-processing → ~15ms faster finals.
-            # endpointing_ms=40: compromise between 60ms (safe) and 30ms (too aggressive for SIP).
-            # no_delay=True: emit finals without waiting for smart_format token sequences.
+            # nova-2 + language="hi" is the correct code for Hindi/Hinglish on Deepgram.
+            # "hi-Latn" (Romanised Hindi) does NOT exist in Deepgram's API → always 400.
+            # With language="hi" Deepgram transcribes Hindi words in Devanagari and
+            # English words in Latin script; the LLM understands both fine.
+            # sample_rate=8000: MUST stay 8000 — SIP PSTN narrowband.
             stt = deepgram_plugin.STT(
                 model="nova-2",
-                language="hi-Latn",   # Hinglish: Hindi in Latin/Roman script (code-switched)
-                smart_format=False,   # off — saves ~15ms, we don't need formatted numbers in TTS
-                punctuate=False,      # off — LLM adds natural pauses via sentence structure
-                sample_rate=8000,     # MUST stay 8000 — SIP PSTN narrowband
-                endpointing_ms=40,    # 40ms: saves 20ms vs 60ms, safer than 30ms on SIP
+                language="hi",
+                smart_format=False,
+                punctuate=False,
+                sample_rate=8000,
+                endpointing_ms=100,
                 no_delay=True,
-                # NOTE: keywords= is intentionally omitted.
-                # Deepgram nova-2 returns HTTP 400 when keywords are used with language=hi-Latn.
-                # The combination is unsupported; remove keywords to keep STT functional.
             )
-            logger.info("STT: Deepgram nova-2 (hi-Latn, 8kHz, endpointing=40ms, no smart_format)")
+            logger.info("STT: Deepgram nova-2 (hi, 8kHz, endpointing=100ms)")
         elif use_sarvam:
             stt = sarvam.STT(
                 language=lang_code,
@@ -166,11 +163,11 @@ class DynamicVoiceAgent(Agent):
         groq_key = os.getenv("GROQ_API_KEY", "")
         if _GROQ_AVAILABLE and groq_key:
             llm = groq_plugin.LLM(
-                model="llama-3.1-8b-instant",  # was 70b-versatile — 8b-instant: ~0.1-0.3s ttft
+                model="llama-3.3-70b-versatile",
                 temperature=float(config.temperature),
                 max_completion_tokens=reply_tokens,
             )
-            logger.info("LLM: Groq llama-3.1-8b-instant (max_tokens=%d)", reply_tokens)
+            logger.info("LLM: Groq llama-3.3-70b-versatile (max_tokens=%d)", reply_tokens)
         else:
             llm = openai.LLM(
                 model=config.model or settings.DEFAULT_LLM_MODEL,
@@ -196,11 +193,11 @@ class DynamicVoiceAgent(Agent):
                 # Avoids asking the neural model to produce 8 kHz directly (low quality).
                 speech_sample_rate=settings.AGENT_TTS_SAMPLE_RATE,
                 enable_preprocessing=True,
-                pace=1.0,           # natural speed (was 1.05 — slightly rushed on phone)
-                temperature=0.25,   # consistent pronunciation (was 0.45 — too much variation)
-                pitch=0.0,          # no artificial pitch shift (was 0.04)
-                loudness=1.5,       # louder for phone clarity (was 1.02)
-                max_chunk_length=60,  # smaller chunks → first audio arrives sooner (was 120)
+                pace=1.05,
+                temperature=0.45,
+                pitch=0.04,
+                loudness=1.02,
+                max_chunk_length=120,
             )
             if use_sarvam
             else openai.TTS()
@@ -519,7 +516,7 @@ async def entrypoint(ctx: JobContext):
         },
         interruption={
             "enabled": config.interruptions_enabled,
-            "min_duration": 0.25,   # was 0.35 — more responsive; VAD still filters SIP noise
+            "min_duration": 0.35,
             "resume_false_interruption": True,
         },
         preemptive_generation={
