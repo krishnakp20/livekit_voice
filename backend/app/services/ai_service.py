@@ -13,6 +13,14 @@ from app.db.models.ai_agent import AIAgent, AIProvider
 class AIService:
     def __init__(self) -> None:
         self._openai = AsyncOpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
+        # Groq as fallback for sentiment when OpenAI quota is exhausted
+        self._groq: AsyncOpenAI | None = None
+        _groq_key = settings.GROQ_API_KEY if hasattr(settings, "GROQ_API_KEY") else __import__("os").getenv("GROQ_API_KEY", "")
+        if _groq_key:
+            self._groq = AsyncOpenAI(
+                api_key=_groq_key,
+                base_url="https://api.groq.com/openai/v1",
+            )
 
     async def generate_response(
         self,
@@ -105,15 +113,25 @@ class AIService:
         return await self.analyze_call_sentiment(text)
 
     async def analyze_call_sentiment(self, caller_text: str) -> float:
-        """Score overall caller tone; neutral inquiries should be near 0."""
-        if not self._openai or not (caller_text or "").strip():
+        """Score overall caller tone; neutral inquiries should be near 0.
+        Uses Groq (llama-3.3-70b) preferentially; falls back to OpenAI gpt-4o-mini."""
+        if not (caller_text or "").strip():
             return 0.0
-        response = await self._openai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": self._SENTIMENT_SYSTEM},
-                {"role": "user", "content": caller_text.strip()},
-            ],
+
+        messages = [
+            {"role": "system", "content": self._SENTIMENT_SYSTEM},
+            {"role": "user", "content": caller_text.strip()},
+        ]
+
+        # Try Groq first (fast + free tier available)
+        client = self._groq or self._openai
+        model = "llama-3.3-70b-versatile" if self._groq else "gpt-4o-mini"
+        if not client:
+            return 0.0
+
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
             max_tokens=10,
             temperature=0,
         )

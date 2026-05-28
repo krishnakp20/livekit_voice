@@ -75,7 +75,7 @@ logger = logging.getLogger("vbots.agent")
 def prewarm(proc: JobProcess) -> None:
     # Silero owns turn boundaries; Sarvam STT uses high_vad_sensitivity=False (see DynamicVoiceAgent)
     proc.userdata["vad"] = silero.VAD.load(
-        min_silence_duration=0.20,
+        min_silence_duration=0.15,   # was 0.20 — faster EOU on phone calls
         prefix_padding_duration=0.15,
     )
 
@@ -93,13 +93,18 @@ class DynamicVoiceAgent(Agent):
         deepgram_key = os.getenv("DEEPGRAM_API_KEY", "")
         if _DEEPGRAM_AVAILABLE and deepgram_key:
             # Streaming STT — processes audio while user speaks (stt_wait ≈ 0)
+            # endpointing=200: Deepgram sends is_final after 200 ms of silence (default ~1000ms)
+            #   → cuts stt_wait dead air from ~1.35s to near-zero
+            # no_delay=True: disable Deepgram's internal pacing delay for faster finals
             stt = deepgram_plugin.STT(
-                model="nova",
+                model="nova-2",
                 language="hi-Latn",   # Hinglish: Hindi in Latin/Roman script (code-switched)
                 smart_format=True,
                 punctuate=True,
+                endpointing=200,
+                no_delay=True,
             )
-            logger.info("STT: Deepgram nova (streaming, hi-Latn Hinglish)")
+            logger.info("STT: Deepgram nova-2 (streaming, hi-Latn Hinglish, endpointing=200ms)")
         elif use_sarvam:
             stt = sarvam.STT(
                 language=lang_code,
@@ -513,14 +518,20 @@ async def entrypoint(ctx: JobContext):
         #
         # Fallback: if sip.callStatus is absent (older LiveKit), we assume answered
         # to preserve backward compatibility.
-        call_active_event = asyncio.Event()
+        # call_resolved fires on sip.callStatus == "active" (answered) OR "bye" (rejected/ended)
+        # This lets us exit immediately instead of waiting the full 55 s timeout.
+        call_resolved_event = asyncio.Event()
+        sip_call_answered = {"value": False}
 
         def _check_sip_status(attrs: dict) -> None:
             status = attrs.get("sip.callStatus", "")
             if status:
                 logger.info("Outbound: sip.callStatus=%r identity=%s", status, sip_identity)
             if status == "active":
-                call_active_event.set()
+                sip_call_answered["value"] = True
+                call_resolved_event.set()
+            elif status in ("bye", "disconnected"):
+                call_resolved_event.set()  # ended without answer — exit immediately
 
         def _on_sip_attrs(changed_attrs: dict, p) -> None:
             if p.identity == sip_identity:
@@ -541,11 +552,11 @@ async def entrypoint(ctx: JobContext):
         if "sip.callStatus" not in current_attrs:
             # Attributes may arrive asynchronously — wait up to 3 s for first delivery
             try:
-                await asyncio.wait_for(call_active_event.wait(), timeout=3.0)
+                await asyncio.wait_for(call_resolved_event.wait(), timeout=3.0)
             except asyncio.TimeoutError:
                 pass  # no attributes yet; will re-check below
 
-            if not call_active_event.is_set():
+            if not call_resolved_event.is_set():
                 # Re-fetch after brief wait
                 try:
                     if hasattr(participant, "attributes") and participant.attributes:
@@ -553,7 +564,7 @@ async def entrypoint(ctx: JobContext):
                 except Exception:
                     pass
 
-            if "sip.callStatus" not in current_attrs and not call_active_event.is_set():
+            if "sip.callStatus" not in current_attrs and not call_resolved_event.is_set():
                 # Old LiveKit without SIP attribute support — fall back to original behavior
                 logger.warning(
                     "Outbound: sip.callStatus attribute not present — assuming answered "
@@ -563,13 +574,13 @@ async def entrypoint(ctx: JobContext):
         else:
             _check_sip_status(current_attrs)
 
-        if not call_active_event.is_set() and not callee_answered["value"]:
-            # Wait for sip.callStatus == "active" (remaining time from 60 s budget)
+        if not call_resolved_event.is_set() and not callee_answered["value"]:
+            # Wait for "active" or "bye" — exit as soon as either fires (max 55 s)
             try:
-                await asyncio.wait_for(call_active_event.wait(), timeout=55.0)
+                await asyncio.wait_for(call_resolved_event.wait(), timeout=55.0)
             except asyncio.TimeoutError:
                 logger.info(
-                    "Outbound: callee did not answer (sip.callStatus never active) room=%s",
+                    "Outbound: callee did not answer (timeout, no sip.callStatus change) room=%s",
                     room_name,
                 )
             finally:
@@ -578,7 +589,7 @@ async def entrypoint(ctx: JobContext):
                 except Exception:
                     pass
 
-            if not call_active_event.is_set():
+            if not sip_call_answered["value"]:
                 # Not answered — shutdown callback will mark lead NO_ANSWER / retry
                 return
         else:
@@ -587,7 +598,7 @@ async def entrypoint(ctx: JobContext):
             except Exception:
                 pass
 
-        if call_active_event.is_set():
+        if sip_call_answered["value"]:
             callee_answered["value"] = True
             logger.info(
                 "Outbound: callee answered (sip.callStatus=active) identity=%s",

@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     # AI Providers
     OPENAI_API_KEY: str = ""
     SARVAM_API_KEY: str = ""
+    GROQ_API_KEY: str = ""
     DEFAULT_LLM_MODEL: str = "gpt-4o-mini"
 
     # Storage
@@ -99,7 +100,7 @@ class Settings(BaseSettings):
         "Transcribe what the caller actually said; do not guess unrelated words."
     )
     AGENT_PREEMPTIVE_GENERATION: bool = False
-    AGENT_MIN_ENDPOINTING_DELAY: float = 0.42
+    AGENT_MIN_ENDPOINTING_DELAY: float = 0.30
     AGENT_MAX_ENDPOINTING_DELAY: float = 2.5
     AGENT_REPLY_MAX_TOKENS: int = 80
     # 8 kHz matches typical PSTN/SIP narrowband; use 16000 only if your trunk is wideband
