@@ -73,9 +73,13 @@ logger = logging.getLogger("vbots.agent")
 
 
 def prewarm(proc: JobProcess) -> None:
-    # Silero owns turn boundaries; Sarvam STT uses high_vad_sensitivity=False (see DynamicVoiceAgent)
+    # VAD detects SPEECH START/END boundaries (audio gating); EOU is decided by the LLM
+    # semantic turn_detection when AGENT_TURN_DETECTION="semantic".
+    # min_silence_duration=0.15 is the audio gate — a brief pause suspends audio to STT.
+    # With semantic mode the LLM then decides whether it's a genuine end-of-turn, so
+    # SIP background noise that causes a 0.15 s VAD gap will NOT trigger a false EOU.
     proc.userdata["vad"] = silero.VAD.load(
-        min_silence_duration=0.15,   # was 0.20 — faster EOU on phone calls
+        min_silence_duration=0.15,
         prefix_padding_duration=0.15,
     )
 
@@ -458,13 +462,22 @@ async def entrypoint(ctx: JobContext):
         prefix_padding_duration=0.35,
     )
 
+    # ── Turn detection ──────────────────────────────────────────────────────────
+    # "semantic" (default) — LLM-based End-of-Utterance classifier:
+    #   • NOT fooled by SIP background hiss / brief silence gaps in the noise
+    #   • Fixes "bot not respond": previously VAD would loop on noise and never
+    #     declare EOU; LLM reads the transcript and decides "did they finish?"
+    #   • Fixes 17-second anomaly: noisy silence no longer resets VAD countdown
+    #   • Small extra latency (~100-200 ms Groq call) but eliminates multi-second hangs
+    # "vad" (legacy) — purely silence-based; fast but fragile on noisy SIP lines
+    # Override via AGENT_TURN_DETECTION env var.
     session = AgentSession(
         vad=vad,
-        turn_detection="vad",
+        turn_detection=settings.AGENT_TURN_DETECTION,
         allow_interruptions=config.interruptions_enabled,
         min_interruption_duration=0.35,
-        min_endpointing_delay=settings.AGENT_MIN_ENDPOINTING_DELAY,
-        max_endpointing_delay=settings.AGENT_MAX_ENDPOINTING_DELAY,
+        min_endpointing_delay=settings.AGENT_MIN_ENDPOINTING_DELAY,   # 0.30 s floor
+        max_endpointing_delay=settings.AGENT_MAX_ENDPOINTING_DELAY,   # 1.5 s safety net
         min_consecutive_speech_delay=0.06,
         preemptive_generation=settings.AGENT_PREEMPTIVE_GENERATION,
         resume_false_interruption=True,
