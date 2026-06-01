@@ -115,10 +115,11 @@ class DynamicVoiceAgent(Agent):
                 smart_format=False,
                 punctuate=False,
                 sample_rate=8000,
-                endpointing_ms=100,
+                endpointing_ms=50,    # 50ms: faster than 100ms, still safe on SIP
                 no_delay=True,
+                detect_language=True, # auto-switch between Hindi and English per utterance
             )
-            logger.info("STT: Deepgram nova-2 (hi, 8kHz, endpointing=100ms)")
+            logger.info("STT: Deepgram nova-2 (hi+detect_language, 8kHz, endpointing=50ms)")
         elif use_sarvam:
             stt = sarvam.STT(
                 language=lang_code,

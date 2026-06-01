@@ -3,3 +3,6 @@
 livekit-agents[silero]>=1.5,<2.0
 livekit-plugins-openai>=1.5,<2.0
 livekit-plugins-sarvam>=1.5,<2.0
+livekit-plugins-groq>=1.5,<2.0
+livekit-plugins-deepgram>=1.5,<2.0
+livekit-plugins-cartesia>=1.5,<2.0
