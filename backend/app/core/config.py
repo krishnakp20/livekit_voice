@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     # Cartesia TTS voice ID — pick a Hindi/multilingual voice from cartesia.ai/voices
     # Leave empty to fall back to Sarvam TTS
     CARTESIA_VOICE_ID: str = ""
-    AGENT_REPLY_MAX_TOKENS: int = 80
+    AGENT_REPLY_MAX_TOKENS: int = 120
     # STT / RoomIO sample rate — must match SIP trunk (8 kHz narrowband PSTN)
     AGENT_AUDIO_SAMPLE_RATE: int = 8000
     # TTS generates at this rate; LiveKit resamples DOWN to AGENT_AUDIO_SAMPLE_RATE for SIP.
