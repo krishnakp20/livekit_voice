@@ -195,12 +195,12 @@ class DynamicVoiceAgent(Agent):
             # Supports Hindi (hi) via the multilingual model.
             # Pick a voice from cartesia.ai/voices and set CARTESIA_VOICE_ID in .env.
             tts = cartesia_plugin.TTS(
-                model="sonic-2-multilingual",
+                model="sonic-3.5",
                 voice=cartesia_voice,
-                language="hi",          # Hindi; switch to "en" if agent is English-only
+                language="hi",
                 sample_rate=settings.AGENT_AUDIO_SAMPLE_RATE,
             )
-            logger.info("TTS: Cartesia sonic-2-multilingual voice=%s (hi)", cartesia_voice)
+            logger.info("TTS: Cartesia sonic-3.5 voice=%s (hi)", cartesia_voice)
         elif use_sarvam:
             tts = sarvam.TTS(
                 model=settings.AGENT_TTS_MODEL,
