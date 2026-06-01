@@ -111,8 +111,11 @@ class Settings(BaseSettings):
     #   "vad"  — Silero VAD silence threshold. Fast but confused by continuous background hiss.
     #   "realtime_llm" — OpenAI Realtime API only; not used here.
     AGENT_TURN_DETECTION: str = "stt"
-    AGENT_MIN_ENDPOINTING_DELAY: float = 0.20
+    AGENT_MIN_ENDPOINTING_DELAY: float = 0.10
     AGENT_MAX_ENDPOINTING_DELAY: float = 1.50
+    # Cartesia TTS voice ID — pick a Hindi/multilingual voice from cartesia.ai/voices
+    # Leave empty to fall back to Sarvam TTS
+    CARTESIA_VOICE_ID: str = ""
     AGENT_REPLY_MAX_TOKENS: int = 80
     # STT / RoomIO sample rate — must match SIP trunk (8 kHz narrowband PSTN)
     AGENT_AUDIO_SAMPLE_RATE: int = 8000

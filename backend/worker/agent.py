@@ -52,6 +52,12 @@ try:
 except ImportError:
     _DEEPGRAM_AVAILABLE = False
 
+try:
+    from livekit.plugins import cartesia as cartesia_plugin
+    _CARTESIA_AVAILABLE = True
+except ImportError:
+    _CARTESIA_AVAILABLE = False
+
 
 from app.core.config import settings
 from app.services.recording_service import recording_path_for_room
@@ -163,11 +169,11 @@ class DynamicVoiceAgent(Agent):
         groq_key = os.getenv("GROQ_API_KEY", "")
         if _GROQ_AVAILABLE and groq_key:
             llm = groq_plugin.LLM(
-                model="llama-3.3-70b-versatile",
+                model="llama-3.1-8b-instant",  # 0.10-0.20s ttft vs 0.40s for 70b — key latency win
                 temperature=float(config.temperature),
                 max_completion_tokens=reply_tokens,
             )
-            logger.info("LLM: Groq llama-3.3-70b-versatile (max_tokens=%d)", reply_tokens)
+            logger.info("LLM: Groq llama-3.1-8b-instant (max_tokens=%d)", reply_tokens)
         else:
             llm = openai.LLM(
                 model=config.model or settings.DEFAULT_LLM_MODEL,
@@ -182,15 +188,27 @@ class DynamicVoiceAgent(Agent):
                 bool(groq_key),
             )
 
-        tts = (
-            sarvam.TTS(
+        cartesia_key = os.getenv("CARTESIA_API_KEY", "")
+        cartesia_voice = settings.CARTESIA_VOICE_ID or os.getenv("CARTESIA_VOICE_ID", "")
+        if _CARTESIA_AVAILABLE and cartesia_key and cartesia_voice:
+            # Cartesia sonic-2-multilingual: ~50-100ms TTFB vs Sarvam ~280ms.
+            # Supports Hindi (hi) via the multilingual model.
+            # Pick a voice from cartesia.ai/voices and set CARTESIA_VOICE_ID in .env.
+            tts = cartesia_plugin.TTS(
+                model="sonic-2-multilingual",
+                voice=cartesia_voice,
+                language="hi",          # Hindi; switch to "en" if agent is English-only
+                sample_rate=settings.AGENT_AUDIO_SAMPLE_RATE,
+            )
+            logger.info("TTS: Cartesia sonic-2-multilingual voice=%s (hi)", cartesia_voice)
+        elif use_sarvam:
+            tts = sarvam.TTS(
                 model=settings.AGENT_TTS_MODEL,
                 speaker=voice_to_sarvam_speaker(
                     config.voice, tts_model=settings.AGENT_TTS_MODEL
                 ),
                 target_language_code=lang_code,
                 # Generate at TTS native rate (22050 Hz); LiveKit resamples to 8 kHz for SIP.
-                # Avoids asking the neural model to produce 8 kHz directly (low quality).
                 speech_sample_rate=settings.AGENT_TTS_SAMPLE_RATE,
                 enable_preprocessing=True,
                 pace=1.05,
@@ -199,9 +217,10 @@ class DynamicVoiceAgent(Agent):
                 loudness=1.02,
                 max_chunk_length=120,
             )
-            if use_sarvam
-            else openai.TTS()
-        )
+            logger.info("TTS: Sarvam %s (fallback)", settings.AGENT_TTS_MODEL)
+        else:
+            tts = openai.TTS()
+            logger.info("TTS: OpenAI (fallback)")
 
         super().__init__(instructions=phone_prompt, stt=stt, llm=llm, tts=tts)
         self._greeting = greeting
