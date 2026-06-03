@@ -485,6 +485,11 @@ async def entrypoint(ctx: JobContext):
             failed=session_failed["value"],
             callee_answered=callee_answered["value"],
         )
+        # Compute + store STT/LLM/TTS cost from accumulated usage
+        if call_id:
+            from worker.call_tracking import persist_call_costs
+
+            await persist_call_costs(call_id)
 
     ctx.add_shutdown_callback(_on_call_end)
 
@@ -553,8 +558,15 @@ async def entrypoint(ctx: JobContext):
 
     @session.on("close")
     def _on_session_close(ev) -> None:
-        if getattr(ev, "error", None):
-            session_failed["value"] = True
+        # Do NOT mark failed on normal participant-disconnect close.
+        # livekit-agents sets ev.error when close_on_disconnect fires (caller hangs up)
+        # — that is a successful call end, not a failure.
+        # Only mark failed when the session crashed (error not related to disconnect).
+        error = getattr(ev, "error", None)
+        if error:
+            err_str = str(error).lower()
+            if "disconnect" not in err_str and "participant" not in err_str:
+                session_failed["value"] = True
 
     if call_id:
         attach_call_listeners(session, call_id, config.client_id)

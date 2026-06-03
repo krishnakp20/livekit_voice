@@ -41,6 +41,16 @@ class CallLog(Base):
 
     duration_seconds: Mapped[Optional[int]] = mapped_column(Integer)
     sentiment_score: Mapped[Optional[float]] = mapped_column(Float)
+
+    # ── Usage + cost tracking (populated by worker at call end) ──────────────
+    stt_audio_seconds: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
+    llm_prompt_tokens: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    llm_completion_tokens: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    tts_characters: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    stt_cost: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
+    llm_cost: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
+    tts_cost: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
+    total_cost: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
     disposition: Mapped[Optional[str]] = mapped_column(String(100))
     summary: Mapped[Optional[str]] = mapped_column(Text)
     metadata_json: Mapped[Optional[str]] = mapped_column(Text)

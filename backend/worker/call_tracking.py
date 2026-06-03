@@ -17,6 +17,74 @@ logger = logging.getLogger("vbots.call_tracking")
 
 
 @dataclass
+class _CallUsage:
+    """Cumulative usage for an entire call — summed across all turns."""
+
+    stt_audio_s: float = 0.0
+    llm_prompt_tokens: int = 0
+    llm_completion_tokens: int = 0
+    tts_chars: int = 0
+
+
+# Per-call usage accumulators, keyed by call_id (lives in worker process memory).
+_USAGE: dict[int, _CallUsage] = {}
+
+
+async def persist_call_costs(call_id: int) -> None:
+    """Compute STT/LLM/TTS cost from accumulated usage and save to call_logs.
+
+    Called once at call end. Pops the accumulator so memory is freed.
+    """
+    usage = _USAGE.pop(call_id, None)
+    if usage is None:
+        return
+
+    from sqlalchemy import select
+
+    from app.core.config import settings
+    from app.db.models.call_log import CallLog
+    from app.db.session import AsyncSessionLocal
+
+    stt_cost = (usage.stt_audio_s / 60.0) * settings.COST_STT_PER_MINUTE
+    llm_cost = (
+        usage.llm_prompt_tokens / 1_000_000 * settings.COST_LLM_INPUT_PER_1M
+        + usage.llm_completion_tokens / 1_000_000 * settings.COST_LLM_OUTPUT_PER_1M
+    )
+    tts_cost = usage.tts_chars / 1_000_000 * settings.COST_TTS_PER_1M_CHARS
+    total_cost = stt_cost + llm_cost + tts_cost
+
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(CallLog).where(CallLog.id == call_id))
+            call = result.scalar_one_or_none()
+            if call:
+                call.stt_audio_seconds = round(usage.stt_audio_s, 2)
+                call.llm_prompt_tokens = usage.llm_prompt_tokens
+                call.llm_completion_tokens = usage.llm_completion_tokens
+                call.tts_characters = usage.tts_chars
+                call.stt_cost = round(stt_cost, 6)
+                call.llm_cost = round(llm_cost, 6)
+                call.tts_cost = round(tts_cost, 6)
+                call.total_cost = round(total_cost, 6)
+                await db.commit()
+        logger.info(
+            "COST call_id=%s | stt=$%.5f (%.1fs) | llm=$%.5f (%d in/%d out) | "
+            "tts=$%.5f (%d chars) | total=$%.5f",
+            call_id,
+            stt_cost,
+            usage.stt_audio_s,
+            llm_cost,
+            usage.llm_prompt_tokens,
+            usage.llm_completion_tokens,
+            tts_cost,
+            usage.tts_chars,
+            total_cost,
+        )
+    except Exception as e:
+        logger.warning("Could not persist call costs call_id=%s: %s", call_id, e)
+
+
+@dataclass
 class _TurnBucket:
     """Metrics for one user→agent turn."""
 
@@ -159,6 +227,7 @@ def attach_call_listeners(session: AgentSession, call_id: int, client_id: int) -
     turn_no = {"n": 0}
     bucket: dict[str, _TurnBucket | None] = {"current": None}
     caller_lines: list[str] = []
+    usage = _USAGE.setdefault(call_id, _CallUsage())
 
     def _new_turn(user_text: str = "") -> _TurnBucket:
         b = _TurnBucket(user_text=user_text)
@@ -177,6 +246,7 @@ def attach_call_listeners(session: AgentSession, call_id: int, client_id: int) -
                 b = _new_turn()
             if m.audio_duration > 0:
                 b.stt_audio_s = max(b.stt_audio_s, m.audio_duration)
+                usage.stt_audio_s += m.audio_duration
             if m.duration > 0:
                 b.stt_api_s = max(b.stt_api_s, m.duration)
         elif isinstance(m, EOUMetrics):
@@ -190,10 +260,13 @@ def attach_call_listeners(session: AgentSession, call_id: int, client_id: int) -
             if m.ttft >= 0:
                 b.llm_ttft_s = m.ttft
             b.llm_total_s = max(b.llm_total_s, m.duration)
+            usage.llm_prompt_tokens += int(getattr(m, "prompt_tokens", 0) or 0)
+            usage.llm_completion_tokens += int(getattr(m, "completion_tokens", 0) or 0)
         elif isinstance(m, TTSMetrics):
             if b is None:
                 b = _new_turn()
             b.record_tts(m.ttfb, m.audio_duration)
+            usage.tts_chars += int(getattr(m, "characters_count", 0) or 0)
 
     @session.on("user_input_transcribed")
     def on_user_transcribed(ev: UserInputTranscribedEvent) -> None:

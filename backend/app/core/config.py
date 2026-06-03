@@ -124,6 +124,15 @@ class Settings(BaseSettings):
     # before the codec step — better than asking the model to output 8 kHz directly.
     AGENT_TTS_SAMPLE_RATE: int = 22050
 
+    # ── Per-call cost rates (USD) ───────────────────────────────────────────
+    # Used to compute and store STT/LLM/TTS cost per call in call_logs.
+    # Override any of these in .env to match your actual provider contracts.
+    COST_STT_PER_MINUTE: float = 0.0058      # Deepgram nova-2 streaming, per audio minute
+    COST_LLM_INPUT_PER_1M: float = 0.05      # Groq llama-3.1-8b-instant, per 1M input tokens
+    COST_LLM_OUTPUT_PER_1M: float = 0.08     # Groq llama-3.1-8b-instant, per 1M output tokens
+    COST_TTS_PER_1M_CHARS: float = 40.0      # Cartesia sonic-3.5, per 1M characters
+    COST_CURRENCY: str = "USD"               # label only; rates above are in this currency
+
     # Auto-close DB rows stuck in ringing/active (Live Calls / dashboard)
     LIVE_CALL_RINGING_MAX_SECONDS: int = 300  # 5 min still ringing → missed
     LIVE_CALL_ACTIVE_MAX_SECONDS: int = 600  # 10 min still active → completed
