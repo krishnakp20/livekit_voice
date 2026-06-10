@@ -28,7 +28,16 @@ _ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(_ENV_PATH, override=True)
 
 try:
-    from livekit.agents import Agent, AgentSession, JobContext, JobProcess, WorkerOptions, cli
+    from livekit.agents import (
+        Agent,
+        AgentSession,
+        JobContext,
+        JobProcess,
+        RunContext,
+        WorkerOptions,
+        cli,
+        function_tool,
+    )
     from livekit.agents.voice import room_io
     from livekit.agents.voice.turn import TurnHandlingOptions  # v1.5+ non-deprecated API
 except ModuleNotFoundError:
@@ -99,6 +108,13 @@ class DynamicVoiceAgent(Agent):
         from app.db.models.ai_agent import AIProvider, Language
         from worker.config_loader import language_to_sarvam_code, voice_to_sarvam_speaker
 
+        # Transfer settings from the agent row. Filled with room/identity at runtime.
+        self._transfer_enabled = bool(getattr(config, "transfer_enabled", False))
+        self._transfer_number = (getattr(config, "transfer_number", "") or "").strip()
+        self._ctx = None          # JobContext — set in entrypoint after creation
+        self._sip_identity = None  # SIP participant to transfer — set in entrypoint
+        self._transfer_done = False
+
         lang_code = language_to_sarvam_code(config.language)
         use_sarvam = config.provider == AIProvider.SARVAM
 
@@ -166,6 +182,24 @@ class DynamicVoiceAgent(Agent):
             "  • Hindi: 'Iske baare mein main aapki madad nahi kar sakta.'\n"
             "  • English: 'I'm sorry, that's outside my area — please contact our support team.'"
         )
+
+        if self._transfer_enabled and self._transfer_number:
+            phone_prompt += (
+                "\n\nCALL TRANSFER (important):\n"
+                "- You can transfer the call to a human agent by calling the "
+                "transfer_to_human function.\n"
+                "- Call transfer_to_human ONLY when:\n"
+                "  • The customer explicitly asks to speak to a human / agent / "
+                "representative / person.\n"
+                "  • The customer is clearly angry or frustrated and you cannot resolve it.\n"
+                "  • The customer asks something important that is outside your scope "
+                "and needs a human.\n"
+                "- Before transferring, say one short line: "
+                "'Sure, please hold while I connect you to our team.' "
+                "(Hindi: 'Theek hai, main aapko team se connect kar raha hoon.')\n"
+                "- Do NOT transfer for simple questions you can answer yourself.\n"
+                "- Never mention the word 'function' to the customer."
+            )
         groq_key = os.getenv("GROQ_API_KEY", "")
         if _GROQ_AVAILABLE and groq_key:
             llm = groq_plugin.LLM(
@@ -228,6 +262,67 @@ class DynamicVoiceAgent(Agent):
 
     async def on_enter(self):
         await self.session.say(self._greeting)
+
+    @function_tool
+    async def transfer_to_human(self, ctx: RunContext) -> str:
+        """Transfer the current phone call to a human agent.
+
+        Use this when the customer asks to speak to a human/agent/representative,
+        is frustrated and you cannot help, or has an important request outside
+        your scope. Do not use it for questions you can answer yourself.
+        """
+        if not (self._transfer_enabled and self._transfer_number):
+            return (
+                "Transfer is not available. Apologise and offer to take their "
+                "details so the team can call back."
+            )
+        if self._transfer_done:
+            return "Transfer already in progress."
+        if not self._ctx or not self._sip_identity:
+            return "Transfer is not available right now; offer a callback instead."
+
+        self._transfer_done = True
+        try:
+            from livekit import api
+
+            # LiveKit API uses http(s); convert the ws(s) URL from settings.
+            http_url = settings.LIVEKIT_URL.replace("wss://", "https://").replace(
+                "ws://", "http://"
+            )
+            digits = "".join(c for c in self._transfer_number if c.isdigit() or c == "+")
+            transfer_to = f"tel:{digits if digits.startswith('+') else '+' + digits}"
+
+            lkapi = api.LiveKitAPI(
+                url=http_url,
+                api_key=settings.LIVEKIT_API_KEY,
+                api_secret=settings.LIVEKIT_API_SECRET,
+            )
+            try:
+                await lkapi.sip.transfer_sip_participant(
+                    api.TransferSIPParticipantRequest(
+                        room_name=self._ctx.room.name,
+                        participant_identity=self._sip_identity,
+                        transfer_to=transfer_to,
+                        play_dialtone=True,
+                    )
+                )
+            finally:
+                await lkapi.aclose()
+
+            logger.info(
+                "Call transferred: room=%s identity=%s → %s",
+                self._ctx.room.name,
+                self._sip_identity,
+                transfer_to,
+            )
+            return "Transfer initiated. The customer is being connected to a human agent."
+        except Exception as e:
+            self._transfer_done = False
+            logger.error("Transfer failed: %s", e)
+            return (
+                "The transfer could not be completed. Apologise and offer to take "
+                "their details for a callback."
+            )
 
 
 def _meta_int(meta: dict, key: str) -> int | None:
@@ -724,6 +819,10 @@ async def entrypoint(ctx: JobContext):
     )
 
     record = session_record_options() if should_record_call(config.record_calls) else False
+
+    # Give the agent what it needs to perform a SIP transfer if the LLM calls the tool.
+    voice_agent._ctx = ctx
+    voice_agent._sip_identity = sip_identity
 
     await session.start(
         voice_agent,

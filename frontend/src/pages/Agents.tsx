@@ -18,6 +18,8 @@ interface Agent {
   fallback_message: string;
   temperature: number;
   max_tokens: number;
+  transfer_enabled: boolean;
+  transfer_number: string | null;
   is_active: boolean;
 }
 
@@ -32,6 +34,8 @@ type AgentForm = {
   fallback_message: string;
   temperature: number;
   max_tokens: number;
+  transfer_enabled: boolean;
+  transfer_number: string;
 };
 
 const defaultForm: AgentForm = {
@@ -45,6 +49,8 @@ const defaultForm: AgentForm = {
   fallback_message: "Maaf kijiye, dobara batayenge?",
   temperature: 0.6,
   max_tokens: 120,
+  transfer_enabled: false,
+  transfer_number: "",
 };
 
 function agentToForm(agent: Agent): AgentForm {
@@ -59,6 +65,8 @@ function agentToForm(agent: Agent): AgentForm {
     fallback_message: agent.fallback_message,
     temperature: agent.temperature,
     max_tokens: agent.max_tokens,
+    transfer_enabled: agent.transfer_enabled ?? false,
+    transfer_number: agent.transfer_number ?? "",
   };
 }
 
@@ -146,6 +154,34 @@ function AgentFormFields({
             onChange={(e) => setForm({ ...form, max_tokens: parseInt(e.target.value, 10) || 120 })}
           />
         </div>
+      </div>
+      <div className="md:col-span-2 border-t border-slate-200 pt-3">
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={form.transfer_enabled}
+            onChange={(e) => setForm({ ...form, transfer_enabled: e.target.checked })}
+          />
+          Enable call transfer to a human agent
+        </label>
+        {form.transfer_enabled && (
+          <div className="mt-2">
+            <label className="text-xs text-slate-500">
+              Transfer phone number (E.164, e.g. +919911362206)
+            </label>
+            <Input
+              type="tel"
+              placeholder="+919911362206"
+              value={form.transfer_number}
+              onChange={(e) => setForm({ ...form, transfer_number: e.target.value })}
+            />
+            <p className="mt-1 text-xs text-slate-400">
+              The bot transfers here when the customer asks for a human, is
+              frustrated, or asks something outside its scope.
+            </p>
+          </div>
+        )}
       </div>
       <div className="md:col-span-2 flex gap-2">
         <Button onClick={onSubmit}>{submitLabel}</Button>
