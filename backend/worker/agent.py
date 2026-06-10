@@ -310,8 +310,33 @@ class DynamicVoiceAgent(Agent):
             http_url = settings.LIVEKIT_URL.replace("wss://", "https://").replace(
                 "ws://", "http://"
             )
-            digits = "".join(c for c in self._transfer_number if c.isdigit() or c == "+")
-            transfer_to = f"tel:{digits if digits.startswith('+') else '+' + digits}"
+
+            # Build the transfer destination URI.
+            # Your trunk rejected tel: with "603 Declined (Non sip: uri)" — it wants
+            # a sip: URI. Priority:
+            #   1. If the configured number is already a sip:/tel: URI → use as-is.
+            #   2. If it contains "@" → prefix sip:.
+            #   3. Else build sip:<number>@<host>, where host comes from
+            #      SIP_TRANSFER_HOST (.env) or the caller's trunk (sip.hostname).
+            raw = self._transfer_number.strip()
+            if raw.startswith(("sip:", "tel:")):
+                transfer_to = raw
+            elif "@" in raw:
+                transfer_to = f"sip:{raw}"
+            else:
+                digits = "".join(c for c in raw if c.isdigit() or c == "+")
+                number = digits if digits.startswith("+") else "+" + digits
+                host = (getattr(settings, "SIP_TRANSFER_HOST", "") or "").strip()
+                if not host:
+                    # Fall back to the trunk host of the current SIP caller.
+                    try:
+                        p = self._ctx.room.remote_participants.get(self._sip_identity)
+                        if p and p.attributes:
+                            host = p.attributes.get("sip.hostname", "") or ""
+                    except Exception:
+                        host = ""
+                transfer_to = f"sip:{number}@{host}" if host else f"tel:{number}"
+            logger.info("Transfer destination URI: %s", transfer_to)
 
             lkapi = api.LiveKitAPI(
                 url=http_url,

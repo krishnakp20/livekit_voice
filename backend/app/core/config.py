@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     # Outbound SIP trunk LiveKit ID (ST_xxx) — set this so campaign/outbound dials skip DB lookup.
     # Get it from SIP Trunks page → Sync from LiveKit, then copy the livekit_trunk_id value.
     LIVEKIT_OUTBOUND_TRUNK_ID: str = ""
+    # Call-transfer destination host for SIP REFER. When an agent's transfer_number is a
+    # plain phone number, the transfer URI is built as sip:<number>@<SIP_TRANSFER_HOST>.
+    # Leave empty to auto-use the inbound caller's trunk host (sip.hostname).
+    # Example: SIP_TRANSFER_HOST=192.168.11.230  (your PBX/gateway)
+    SIP_TRANSFER_HOST: str = ""
 
     # AI Providers
     OPENAI_API_KEY: str = ""
