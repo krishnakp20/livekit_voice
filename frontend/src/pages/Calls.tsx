@@ -32,9 +32,14 @@ function displayNumber(c: CallRow): string {
 
 function formatDateTime(iso: string): string {
   if (!iso) return "—";
-  const d = new Date(iso);
+  // Backend stores UTC. If the string has no timezone marker (no trailing Z
+  // and no +hh:mm / -hh:mm offset), it's a naive UTC timestamp — append "Z"
+  // so the browser parses it as UTC instead of local time.
+  const hasTz = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso.trim());
+  const d = new Date(hasTz ? iso : `${iso}Z`);
   if (isNaN(d.getTime())) return "—";
   return d.toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
     day: "2-digit",
     month: "short",
     year: "numeric",
