@@ -33,10 +33,8 @@ try:
         AgentSession,
         JobContext,
         JobProcess,
-        RunContext,
         WorkerOptions,
         cli,
-        function_tool,
     )
     from livekit.agents.voice import room_io
     from livekit.agents.voice.turn import TurnHandlingOptions  # v1.5+ non-deprecated API
@@ -102,25 +100,34 @@ logger = logging.getLogger("vbots.agent")
 # Deterministic transfer triggers — matched against the customer's transcript.
 # Covers English + Hindi/Hinglish ways of asking for a human agent.
 _TRANSFER_KEYWORDS = (
+    # English
     "transfer",
     "human",
+    "agent",
     "representative",
+    "executive",
+    "senior",
+    "supervisor",
+    "manager",
     "customer care",
     "real person",
-    "speak to agent",
-    "talk to agent",
+    "someone else",
+    "talk to someone",
+    "speak to someone",
     "connect me",
-    "connect to agent",
+    "connect my call",
+    # Hindi / Hinglish
+    "insaan",
+    "aadmi",
+    "vyakti",
     "kisi se baat",
     "baat karni",
     "baat karwa",
-    "insaan",
-    "aadmi se",
-    "vyakti",
-    "agent se",
-    "agent ko",
-    "manager",
-    "supervisor",
+    "baat kara",
+    "transfer kar",
+    "connect kar",
+    "senior se",
+    "bade officer",
 )
 
 
@@ -218,23 +225,10 @@ class DynamicVoiceAgent(Agent):
             "  • English: 'I'm sorry, that's outside my area — please contact our support team.'"
         )
 
-        if self._transfer_enabled and self._transfer_number:
-            phone_prompt += (
-                "\n\nCALL TRANSFER (important):\n"
-                "- You can transfer the call to a human agent by calling the "
-                "transfer_to_human function.\n"
-                "- Call transfer_to_human ONLY when:\n"
-                "  • The customer explicitly asks to speak to a human / agent / "
-                "representative / person.\n"
-                "  • The customer is clearly angry or frustrated and you cannot resolve it.\n"
-                "  • The customer asks something important that is outside your scope "
-                "and needs a human.\n"
-                "- Before transferring, say one short line: "
-                "'Sure, please hold while I connect you to our team.' "
-                "(Hindi: 'Theek hai, main aapko team se connect kar raha hoon.')\n"
-                "- Do NOT transfer for simple questions you can answer yourself.\n"
-                "- Never mention the word 'function' to the customer."
-            )
+        # NOTE: Transfer is handled deterministically in on_user_turn_completed via
+        # keyword detection — NOT via an LLM tool call. Groq's 8b model emits tool
+        # calls as plain text (<function=...>), which leaks into TTS and never fires.
+        # So we intentionally do NOT instruct the LLM to transfer here.
         groq_key = os.getenv("GROQ_API_KEY", "")
         if _GROQ_AVAILABLE and groq_key:
             llm = groq_plugin.LLM(
@@ -372,21 +366,6 @@ class DynamicVoiceAgent(Agent):
                     "and our team will call you back."
                 )
             raise StopResponse()
-
-    @function_tool
-    async def transfer_to_human(self, ctx: RunContext) -> str:
-        """Transfer the current phone call to a human agent.
-
-        Use when the customer asks for a human/agent/representative, is frustrated
-        and you cannot help, or has an important request outside your scope.
-        """
-        ok = await self._perform_transfer()
-        if ok:
-            return "Transfer initiated. The customer is being connected to a human agent."
-        return (
-            "The transfer could not be completed. Apologise and offer to take "
-            "their details for a callback."
-        )
 
 
 def _meta_int(meta: dict, key: str) -> int | None:
