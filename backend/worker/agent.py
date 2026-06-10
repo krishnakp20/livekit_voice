@@ -48,6 +48,17 @@ except ModuleNotFoundError:
         "livekit-plugins-sarvam==1.2.8 livekit-plugins-silero==1.2.8\n"
     )
     raise SystemExit(1)
+# StopResponse moved across versions — import defensively so the worker never
+# crashes on a missing path. Falls back to a local sentinel exception.
+try:
+    from livekit.agents.llm import StopResponse
+except ImportError:
+    try:
+        from livekit.agents import StopResponse
+    except ImportError:
+        class StopResponse(Exception):  # type: ignore
+            """Fallback if the SDK doesn't expose StopResponse."""
+
 from livekit.plugins import openai, sarvam, silero
 try:
     from livekit.plugins import groq as groq_plugin
@@ -87,6 +98,30 @@ from worker.recordings import (
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 logger = logging.getLogger("vbots.agent")
+
+# Deterministic transfer triggers — matched against the customer's transcript.
+# Covers English + Hindi/Hinglish ways of asking for a human agent.
+_TRANSFER_KEYWORDS = (
+    "transfer",
+    "human",
+    "representative",
+    "customer care",
+    "real person",
+    "speak to agent",
+    "talk to agent",
+    "connect me",
+    "connect to agent",
+    "kisi se baat",
+    "baat karni",
+    "baat karwa",
+    "insaan",
+    "aadmi se",
+    "vyakti",
+    "agent se",
+    "agent ko",
+    "manager",
+    "supervisor",
+)
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -263,23 +298,15 @@ class DynamicVoiceAgent(Agent):
     async def on_enter(self):
         await self.session.say(self._greeting)
 
-    @function_tool
-    async def transfer_to_human(self, ctx: RunContext) -> str:
-        """Transfer the current phone call to a human agent.
-
-        Use this when the customer asks to speak to a human/agent/representative,
-        is frustrated and you cannot help, or has an important request outside
-        your scope. Do not use it for questions you can answer yourself.
-        """
+    async def _perform_transfer(self) -> bool:
+        """Execute the SIP REFER transfer. Returns True on success."""
         if not (self._transfer_enabled and self._transfer_number):
-            return (
-                "Transfer is not available. Apologise and offer to take their "
-                "details so the team can call back."
-            )
+            return False
         if self._transfer_done:
-            return "Transfer already in progress."
+            return True
         if not self._ctx or not self._sip_identity:
-            return "Transfer is not available right now; offer a callback instead."
+            logger.warning("Transfer requested but ctx/sip_identity missing")
+            return False
 
         self._transfer_done = True
         try:
@@ -315,14 +342,51 @@ class DynamicVoiceAgent(Agent):
                 self._sip_identity,
                 transfer_to,
             )
-            return "Transfer initiated. The customer is being connected to a human agent."
+            return True
         except Exception as e:
             self._transfer_done = False
             logger.error("Transfer failed: %s", e)
-            return (
-                "The transfer could not be completed. Apologise and offer to take "
-                "their details for a callback."
+            return False
+
+    async def on_user_turn_completed(self, turn_ctx, new_message) -> None:
+        """Deterministic transfer trigger — runs BEFORE the LLM.
+
+        Groq's 8b model emits tool calls unreliably (as text), so we detect a
+        clear human/transfer request by keyword and transfer directly. Raising
+        StopResponse prevents the LLM from generating a reply for this turn.
+        """
+        if not (self._transfer_enabled and self._transfer_number) or self._transfer_done:
+            return
+        text = (getattr(new_message, "text_content", "") or "").lower()
+        if not text:
+            return
+        if any(kw in text for kw in _TRANSFER_KEYWORDS):
+            logger.info("Transfer keyword detected in: %r", text[:80])
+            await self.session.say(
+                "Sure, please hold while I connect you to our team."
             )
+            ok = await self._perform_transfer()
+            if not ok:
+                await self.session.say(
+                    "Sorry, I could not connect the call. Please share your number "
+                    "and our team will call you back."
+                )
+            raise StopResponse()
+
+    @function_tool
+    async def transfer_to_human(self, ctx: RunContext) -> str:
+        """Transfer the current phone call to a human agent.
+
+        Use when the customer asks for a human/agent/representative, is frustrated
+        and you cannot help, or has an important request outside your scope.
+        """
+        ok = await self._perform_transfer()
+        if ok:
+            return "Transfer initiated. The customer is being connected to a human agent."
+        return (
+            "The transfer could not be completed. Apologise and offer to take "
+            "their details for a callback."
+        )
 
 
 def _meta_int(meta: dict, key: str) -> int | None:
