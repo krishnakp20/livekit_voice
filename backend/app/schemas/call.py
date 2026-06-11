@@ -34,6 +34,8 @@ class CallLogResponse(BaseModel):
     sentiment_score: Optional[float]
     disposition: Optional[str]
     summary: Optional[str]
+    collected_data: Optional[str] = None
+    total_cost: Optional[float] = None
     started_at: datetime
     ended_at: Optional[datetime]
     transcripts: List[TranscriptEntry] = []

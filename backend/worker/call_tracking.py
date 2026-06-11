@@ -163,6 +163,62 @@ async def _update_call_sentiment(call_id: int, client_id: int, caller_lines: lis
     return score
 
 
+async def extract_and_store_call_data(call_id: int) -> None:
+    """At call end: extract the agent's configured fields from the transcript → JSON.
+
+    No-op if the agent has no data_fields_json configured.
+    """
+    import json as _json
+
+    from sqlalchemy import select
+
+    from app.db.models.ai_agent import AIAgent
+    from app.db.models.call_log import CallLog
+    from app.db.models.transcript import SpeakerRole, Transcript
+    from app.db.session import AsyncSessionLocal
+    from app.services.ai_service import ai_service
+
+    async with AsyncSessionLocal() as db:
+        call = (
+            await db.execute(select(CallLog).where(CallLog.id == call_id))
+        ).scalar_one_or_none()
+        if not call or not call.agent_id:
+            return
+        agent = (
+            await db.execute(select(AIAgent).where(AIAgent.id == call.agent_id))
+        ).scalar_one_or_none()
+        if not agent or not agent.data_fields_json:
+            return
+        try:
+            fields = _json.loads(agent.data_fields_json)
+        except (ValueError, TypeError):
+            return
+        if not isinstance(fields, list) or not fields:
+            return
+
+        # Build the full transcript (both speakers) in order.
+        rows = await db.execute(
+            select(Transcript.speaker, Transcript.content)
+            .where(Transcript.call_id == call_id)
+            .order_by(Transcript.sequence)
+        )
+        lines = []
+        for speaker, content in rows.all():
+            if not content:
+                continue
+            who = "Customer" if speaker == SpeakerRole.USER else "Agent"
+            lines.append(f"{who}: {content}")
+        transcript = "\n".join(lines)
+        if not transcript:
+            return
+
+        data = await ai_service.extract_call_data(transcript, fields)
+        if data:
+            call.collected_data = _json.dumps(data, ensure_ascii=False)
+            await db.commit()
+            logger.info("Collected data call_id=%s: %s", call_id, data)
+
+
 async def refresh_call_sentiment_from_db(call_id: int, client_id: int) -> None:
     """Re-score at hangup from all saved user transcript lines."""
     from sqlalchemy import select

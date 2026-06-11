@@ -20,7 +20,30 @@ interface Agent {
   max_tokens: number;
   transfer_enabled: boolean;
   transfer_number: string | null;
+  data_fields_json: string | null;
   is_active: boolean;
+}
+
+/** "key: description" per line  ⇄  JSON [{key, description}] */
+function fieldsToText(json: string | null | undefined): string {
+  if (!json) return "";
+  try {
+    const arr = JSON.parse(json);
+    if (!Array.isArray(arr)) return "";
+    return arr.map((f) => `${f.key}: ${f.description || ""}`).join("\n");
+  } catch {
+    return "";
+  }
+}
+function textToFieldsJson(text: string): string {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const arr = lines.map((l) => {
+    const idx = l.indexOf(":");
+    const key = (idx === -1 ? l : l.slice(0, idx)).trim().replace(/\s+/g, "_").toLowerCase();
+    const description = idx === -1 ? l : l.slice(idx + 1).trim();
+    return { key, description };
+  });
+  return JSON.stringify(arr);
 }
 
 type AgentForm = {
@@ -36,6 +59,7 @@ type AgentForm = {
   max_tokens: number;
   transfer_enabled: boolean;
   transfer_number: string;
+  data_fields_text: string;
 };
 
 const defaultForm: AgentForm = {
@@ -51,6 +75,7 @@ const defaultForm: AgentForm = {
   max_tokens: 120,
   transfer_enabled: false,
   transfer_number: "",
+  data_fields_text: "name: customer full name\nphone: contact number\ncity: city and state\ncapacity: required inverter capacity\nusage: home / shop / office / factory",
 };
 
 function agentToForm(agent: Agent): AgentForm {
@@ -67,6 +92,7 @@ function agentToForm(agent: Agent): AgentForm {
     max_tokens: agent.max_tokens,
     transfer_enabled: agent.transfer_enabled ?? false,
     transfer_number: agent.transfer_number ?? "",
+    data_fields_text: fieldsToText(agent.data_fields_json),
   };
 }
 
@@ -183,6 +209,19 @@ function AgentFormFields({
           </div>
         )}
       </div>
+      <div className="md:col-span-2 border-t border-slate-200 pt-3">
+        <label className="text-sm text-slate-700">Data to collect from the call</label>
+        <p className="mb-1 text-xs text-slate-400">
+          One field per line, format <code>key: description</code>. The bot asks for
+          these during the call and they're auto-extracted from the transcript afterwards.
+        </p>
+        <Textarea
+          rows={5}
+          placeholder={"name: customer full name\nphone: contact number\ncity: city and state"}
+          value={form.data_fields_text}
+          onChange={(e) => setForm({ ...form, data_fields_text: e.target.value })}
+        />
+      </div>
       <div className="md:col-span-2 flex gap-2">
         <Button onClick={onSubmit}>{submitLabel}</Button>
         {onCancel && (
@@ -211,10 +250,15 @@ export default function Agents() {
     load();
   }, []);
 
+  const toPayload = (form: AgentForm) => {
+    const { data_fields_text, ...rest } = form;
+    return { ...rest, data_fields_json: textToFieldsJson(data_fields_text) };
+  };
+
   const handleCreate = async () => {
     setSaving(true);
     try {
-      await createAgent(createForm);
+      await createAgent(toPayload(createForm));
       setShowCreate(false);
       setCreateForm(defaultForm);
       await load();
@@ -239,7 +283,7 @@ export default function Agents() {
     if (editingId == null) return;
     setSaving(true);
     try {
-      await updateAgent(editingId, editForm);
+      await updateAgent(editingId, toPayload(editForm));
       setEditingId(null);
       await load();
     } finally {

@@ -53,6 +53,9 @@ class AIAgent(Base):
     # Business hours (JSON string)
     business_hours_json: Mapped[Optional[str]] = mapped_column(Text)
     transfer_rules_json: Mapped[Optional[str]] = mapped_column(Text)
+    # Data-collection fields — JSON array of {"key","description"} the bot should
+    # capture from the conversation; extracted from the transcript after each call.
+    data_fields_json: Mapped[Optional[str]] = mapped_column(Text)
 
     # LiveKit
     livekit_agent_id: Mapped[Optional[str]] = mapped_column(String(255))

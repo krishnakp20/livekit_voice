@@ -143,4 +143,56 @@ class AIService:
             return 0.0
 
 
+    async def extract_call_data(self, transcript: str, fields: list[dict]) -> dict:
+        """Extract structured fields from a call transcript.
+
+        `fields` is a list like [{"key": "name", "description": "customer name"}, ...].
+        Returns a dict {key: value | null}. Uses Groq (fast) then OpenAI fallback.
+        """
+        import json
+
+        if not (transcript or "").strip() or not fields:
+            return {}
+
+        field_lines = "\n".join(
+            f"- {f.get('key')}: {f.get('description', f.get('key'))}" for f in fields if f.get("key")
+        )
+        keys = [f["key"] for f in fields if f.get("key")]
+        system = (
+            "You extract structured information from a customer-service phone call "
+            "transcript (Hindi, English, or Hinglish). Extract ONLY these fields:\n"
+            f"{field_lines}\n\n"
+            "Rules:\n"
+            "- Return a single JSON object with exactly these keys: "
+            f"{', '.join(keys)}.\n"
+            "- If a field was not mentioned or is unclear, set it to null.\n"
+            "- For phone numbers, return digits only (no spaces).\n"
+            "- Do not invent values. Return ONLY the JSON, no extra text."
+        )
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": transcript.strip()[:6000]},
+        ]
+
+        client = self._groq or self._openai
+        model = "llama-3.3-70b-versatile" if self._groq else "gpt-4o-mini"
+        if not client:
+            return {}
+
+        try:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=400,
+                temperature=0,
+                response_format={"type": "json_object"},
+            )
+            raw = (response.choices[0].message.content or "").strip()
+            data = json.loads(raw)
+            # Keep only the declared keys
+            return {k: data.get(k) for k in keys}
+        except Exception:
+            return {}
+
+
 ai_service = AIService()

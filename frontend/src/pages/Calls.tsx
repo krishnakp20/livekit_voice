@@ -19,6 +19,8 @@ interface CallRow {
   duration_seconds: number | null;
   status: string;
   sentiment_score: number | null;
+  collected_data?: string | null;
+  total_cost?: number | null;
   started_at: string;
   has_recording: boolean;
   recording_url: string | null;
@@ -229,6 +231,34 @@ export default function Calls() {
                     </p>
                   </div>
                 </div>
+
+                {detail.collected_data && (() => {
+                  let data: Record<string, unknown> = {};
+                  try {
+                    data = JSON.parse(detail.collected_data);
+                  } catch {
+                    return null;
+                  }
+                  const entries = Object.entries(data);
+                  if (entries.length === 0) return null;
+                  return (
+                    <div>
+                      <span className="text-slate-500 block mb-1">Collected details</span>
+                      <div className="rounded-md border border-slate-200 divide-y divide-slate-100">
+                        {entries.map(([k, v]) => (
+                          <div key={k} className="flex justify-between px-3 py-1.5 text-sm">
+                            <span className="capitalize text-slate-500">
+                              {k.replace(/_/g, " ")}
+                            </span>
+                            <span className="font-medium text-slate-800">
+                              {v == null || v === "" ? "—" : String(v)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 <div>
                   <span className="text-slate-500 block mb-2">Recording</span>

@@ -650,9 +650,14 @@ async def entrypoint(ctx: JobContext):
         )
         # Compute + store STT/LLM/TTS cost from accumulated usage
         if call_id:
-            from worker.call_tracking import persist_call_costs
+            from worker.call_tracking import extract_and_store_call_data, persist_call_costs
 
             await persist_call_costs(call_id)
+            # Extract structured details (name, phone, etc.) from the transcript.
+            try:
+                await extract_and_store_call_data(call_id)
+            except Exception as e:
+                logger.warning("Data extraction failed call_id=%s: %s", call_id, e)
 
     ctx.add_shutdown_callback(_on_call_end)
 

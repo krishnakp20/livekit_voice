@@ -51,6 +51,9 @@ class CallLog(Base):
     llm_cost: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
     tts_cost: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
     total_cost: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
+
+    # Structured data extracted from the transcript at call end (JSON object).
+    collected_data: Mapped[Optional[str]] = mapped_column(Text)
     disposition: Mapped[Optional[str]] = mapped_column(String(100))
     summary: Mapped[Optional[str]] = mapped_column(Text)
     metadata_json: Mapped[Optional[str]] = mapped_column(Text)
