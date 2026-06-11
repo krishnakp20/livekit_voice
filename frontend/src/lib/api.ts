@@ -92,6 +92,12 @@ export const uploadLeads = (file: File, campaignId?: number) => {
 
 // Calls
 export const getCalls = () => api.get("/calls");
+/** Download all calls (with collected-data columns) as CSV. */
+export const exportCallsCsv = (campaignId?: number) =>
+  api.get("/calls/export.csv", {
+    params: campaignId ? { campaign_id: campaignId } : {},
+    responseType: "blob",
+  });
 export const getLiveCalls = () => api.get("/calls/live");
 export const getCall = (id: number) => api.get(`/calls/${id}`);
 

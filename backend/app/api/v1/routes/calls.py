@@ -59,6 +59,81 @@ async def list_calls(db: DbSession, current_user: CurrentUser, skip: int = 0, li
     return [await _enrich_call_response(db, c) for c in calls]
 
 
+@router.get("/export.csv")
+async def export_calls_csv(
+    db: DbSession,
+    current_user: CurrentUser,
+    campaign_id: Optional[int] = None,
+):
+    """Download all calls as CSV, including every collected_data field as its own column."""
+    import csv
+    import io
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    query = select(CallLog).where(CallLog.client_id == current_user.client_id)
+    if campaign_id is not None:
+        query = query.where(CallLog.campaign_id == campaign_id)
+    result = await db.execute(query.order_by(CallLog.started_at.desc()))
+    calls = result.scalars().all()
+
+    # Parse collected_data for each call and gather the union of all field keys.
+    parsed: list[dict] = []
+    data_keys: list[str] = []
+    for c in calls:
+        d = {}
+        if c.collected_data:
+            try:
+                d = _json.loads(c.collected_data) or {}
+            except (ValueError, TypeError):
+                d = {}
+        for k in d:
+            if k not in data_keys:
+                data_keys.append(k)
+        parsed.append(d)
+
+    base_cols = [
+        "id", "direction", "status", "caller_number", "callee_number", "did_number",
+        "duration_seconds", "sentiment_score", "disposition",
+        "stt_cost", "llm_cost", "tts_cost", "total_cost",
+        "started_at", "ended_at",
+    ]
+    header = base_cols + [f"data_{k}" for k in data_keys]
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(header)
+    for c, d in zip(calls, parsed):
+        row = [
+            c.id,
+            c.direction.value if c.direction else "",
+            c.status.value if c.status else "",
+            c.caller_number or "",
+            c.callee_number or "",
+            c.did_number or "",
+            c.duration_seconds if c.duration_seconds is not None else "",
+            f"{c.sentiment_score:.2f}" if c.sentiment_score is not None else "",
+            c.disposition or "",
+            f"{c.stt_cost or 0:.6f}",
+            f"{c.llm_cost or 0:.6f}",
+            f"{c.tts_cost or 0:.6f}",
+            f"{c.total_cost or 0:.6f}",
+            c.started_at.isoformat() if c.started_at else "",
+            c.ended_at.isoformat() if c.ended_at else "",
+        ]
+        row += [("" if d.get(k) is None else str(d.get(k))) for k in data_keys]
+        writer.writerow(row)
+
+    buf.seek(0)
+    filename = f"calls_export{'_campaign_' + str(campaign_id) if campaign_id else ''}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/live/reconcile")
 async def reconcile_live_calls(db: DbSession, current_user: CurrentUser):
     """Close stale ringing/active rows (ghost dashboard live count)."""

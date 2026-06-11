@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { fetchCallRecordingBlob, getCall, getCalls } from "@/lib/api";
+import { exportCallsCsv, fetchCallRecordingBlob, getCall, getCalls } from "@/lib/api";
 
 interface TranscriptEntry {
   id: number;
@@ -73,6 +73,24 @@ export default function Calls() {
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [recordingError, setRecordingError] = useState(false);
   const [loadingRecording, setLoadingRecording] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await exportCallsCsv();
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: "text/csv" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `calls_export_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   useEffect(() => {
     getCalls()
@@ -130,7 +148,16 @@ export default function Calls() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-6">Call History</h2>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold">Call History</h2>
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+        >
+          {exporting ? "Exporting…" : "Export CSV"}
+        </button>
+      </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2">
           <CardContent className="p-0">
