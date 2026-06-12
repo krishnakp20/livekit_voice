@@ -258,27 +258,49 @@ class DynamicVoiceAgent(Agent):
         # keyword detection — NOT via an LLM tool call. Groq's 8b model emits tool
         # calls as plain text (<function=...>), which leaks into TTS and never fires.
         # So we intentionally do NOT instruct the LLM to transfer here.
+        # LLM selection with automatic fallback:
+        #   primary = Groq (fast/cheap) — but free tier hits 429 token-rate limits.
+        #   fallback = OpenAI — kicks in automatically when Groq errors (429/5xx),
+        #   so the bot NEVER goes silent mid-call due to a Groq rate limit.
         groq_key = os.getenv("GROQ_API_KEY", "")
+        openai_key = os.getenv("OPENAI_API_KEY", "")
+        groq_llm = None
+        openai_llm = None
         if _GROQ_AVAILABLE and groq_key:
-            llm = groq_plugin.LLM(
-                model="llama-3.1-8b-instant",  # 0.10-0.20s ttft vs 0.40s for 70b — key latency win
+            groq_llm = groq_plugin.LLM(
+                model="llama-3.1-8b-instant",
                 temperature=float(config.temperature),
                 max_completion_tokens=reply_tokens,
             )
-            logger.info("LLM: Groq llama-3.1-8b-instant (max_tokens=%d)", reply_tokens)
-        else:
-            llm = openai.LLM(
+        if openai_key:
+            openai_llm = openai.LLM(
                 model=config.model or settings.DEFAULT_LLM_MODEL,
                 temperature=float(config.temperature),
                 max_completion_tokens=reply_tokens,
             )
+
+        if groq_llm and openai_llm:
+            # FallbackAdapter tries Groq first; on error switches to OpenAI for that turn.
+            from livekit.agents import llm as _lk_llm
+
+            llm = _lk_llm.FallbackAdapter([groq_llm, openai_llm])
             logger.info(
-                "LLM: OpenAI %s (max_tokens=%d) [groq_available=%s, groq_key=%s]",
+                "LLM: Groq llama-3.1-8b-instant → OpenAI %s fallback (max_tokens=%d)",
                 config.model or settings.DEFAULT_LLM_MODEL,
                 reply_tokens,
-                _GROQ_AVAILABLE,
-                bool(groq_key),
             )
+        elif groq_llm:
+            llm = groq_llm
+            logger.info(
+                "LLM: Groq llama-3.1-8b-instant (max_tokens=%d) — NO OpenAI fallback "
+                "(set OPENAI_API_KEY to avoid silence on 429)",
+                reply_tokens,
+            )
+        elif openai_llm:
+            llm = openai_llm
+            logger.info("LLM: OpenAI %s (max_tokens=%d)", config.model or settings.DEFAULT_LLM_MODEL, reply_tokens)
+        else:
+            raise RuntimeError("No LLM configured: set GROQ_API_KEY and/or OPENAI_API_KEY")
 
         cartesia_key = os.getenv("CARTESIA_API_KEY", "")
         cartesia_voice = settings.CARTESIA_VOICE_ID or os.getenv("CARTESIA_VOICE_ID", "")
