@@ -279,16 +279,24 @@ class DynamicVoiceAgent(Agent):
                 max_completion_tokens=reply_tokens,
             )
 
-        if groq_llm and openai_llm:
-            # FallbackAdapter tries Groq first; on error switches to OpenAI for that turn.
-            from livekit.agents import llm as _lk_llm
+        # LLM_PRIMARY chooses which provider runs first:
+        #   "openai" (default) — reliable, good quality, no rate-limit storm. Use this
+        #                        on Groq FREE tier (6000 TPM is too small for calls).
+        #   "groq"   — fast/cheap; only sensible on Groq DEV tier (paid, high limits).
+        # The other provider becomes the automatic fallback.
+        llm_primary = os.getenv("LLM_PRIMARY", "openai").strip().lower()
+        from livekit.agents import llm as _lk_llm
 
-            llm = _lk_llm.FallbackAdapter([groq_llm, openai_llm])
-            logger.info(
-                "LLM: Groq llama-3.1-8b-instant → OpenAI %s fallback (max_tokens=%d)",
-                config.model or settings.DEFAULT_LLM_MODEL,
-                reply_tokens,
-            )
+        if groq_llm and openai_llm:
+            if llm_primary == "groq":
+                llm = _lk_llm.FallbackAdapter([groq_llm, openai_llm])
+                logger.info("LLM: Groq (primary) → OpenAI fallback (max_tokens=%d)", reply_tokens)
+            else:
+                llm = _lk_llm.FallbackAdapter([openai_llm, groq_llm])
+                logger.info("LLM: OpenAI (primary) → Groq fallback (max_tokens=%d)", reply_tokens)
+        elif openai_llm:
+            llm = openai_llm
+            logger.info("LLM: OpenAI %s (max_tokens=%d)", config.model or settings.DEFAULT_LLM_MODEL, reply_tokens)
         elif groq_llm:
             llm = groq_llm
             logger.info(
@@ -296,9 +304,6 @@ class DynamicVoiceAgent(Agent):
                 "(set OPENAI_API_KEY to avoid silence on 429)",
                 reply_tokens,
             )
-        elif openai_llm:
-            llm = openai_llm
-            logger.info("LLM: OpenAI %s (max_tokens=%d)", config.model or settings.DEFAULT_LLM_MODEL, reply_tokens)
         else:
             raise RuntimeError("No LLM configured: set GROQ_API_KEY and/or OPENAI_API_KEY")
 
