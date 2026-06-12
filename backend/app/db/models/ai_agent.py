@@ -33,6 +33,8 @@ class AIAgent(Base):
     # AI config
     language: Mapped[Language] = mapped_column(Enum(Language), default=Language.HINGLISH)
     voice: Mapped[str] = mapped_column(String(100), default="simran")
+    # Persona gender — drives Hindi verb-form grammar ('kar sakti hoon' vs 'kar sakta hoon').
+    gender: Mapped[str] = mapped_column(String(10), default="female")
     provider: Mapped[AIProvider] = mapped_column(Enum(AIProvider), default=AIProvider.SARVAM)
     model: Mapped[str] = mapped_column(String(100), default="gpt-4o-mini")
     prompt: Mapped[str] = mapped_column(Text, default="You are a helpful AI voice agent.")

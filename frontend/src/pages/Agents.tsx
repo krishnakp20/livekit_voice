@@ -21,6 +21,7 @@ interface Agent {
   transfer_enabled: boolean;
   transfer_number: string | null;
   data_fields_json: string | null;
+  gender: string;
   is_active: boolean;
 }
 
@@ -60,12 +61,14 @@ type AgentForm = {
   transfer_enabled: boolean;
   transfer_number: string;
   data_fields_text: string;
+  gender: string;
 };
 
 const defaultForm: AgentForm = {
   name: "",
   language: "hi-en",
   voice: "simran",
+  gender: "female",
   provider: "sarvam",
   model: "gpt-4o-mini",
   prompt: "You are a friendly Indian sales agent.",
@@ -83,6 +86,7 @@ function agentToForm(agent: Agent): AgentForm {
     name: agent.name,
     language: agent.language,
     voice: agent.voice,
+    gender: agent.gender ?? "female",
     provider: agent.provider,
     model: agent.model,
     prompt: agent.prompt,
@@ -130,6 +134,10 @@ function AgentFormFields({
         value={form.voice}
         onChange={(e) => setForm({ ...form, voice: e.target.value })}
       />
+      <Select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
+        <option value="female">Female (uses feminine Hindi grammar)</option>
+        <option value="male">Male (uses masculine Hindi grammar)</option>
+      </Select>
       <Input
         placeholder="Model (e.g. gpt-4o-mini)"
         value={form.model}

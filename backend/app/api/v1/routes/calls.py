@@ -125,11 +125,13 @@ async def export_calls_csv(
         row += [("" if d.get(k) is None else str(d.get(k))) for k in data_keys]
         writer.writerow(row)
 
-    buf.seek(0)
+    # Prepend a UTF-8 BOM so Excel detects UTF-8 and renders Hindi/Devanagari
+    # correctly instead of mojibake (à¤µà¤°à¥...). ﻿ = BOM.
+    csv_bytes = (chr(0xFEFF) + buf.getvalue()).encode("utf-8")
     filename = f"calls_export{'_campaign_' + str(campaign_id) if campaign_id else ''}.csv"
     return StreamingResponse(
-        iter([buf.getvalue()]),
-        media_type="text/csv",
+        iter([csv_bytes]),
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

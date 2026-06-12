@@ -10,6 +10,7 @@ class AIAgentCreate(BaseModel):
     name: str
     language: Language = Language.HINGLISH
     voice: str = "simran"
+    gender: str = "female"
     provider: AIProvider = AIProvider.SARVAM
     model: str = "gpt-4o-mini"
     prompt: str = "You are a helpful AI voice agent."
@@ -31,6 +32,7 @@ class AIAgentUpdate(BaseModel):
     name: Optional[str] = None
     language: Optional[Language] = None
     voice: Optional[str] = None
+    gender: Optional[str] = None
     provider: Optional[AIProvider] = None
     model: Optional[str] = None
     prompt: Optional[str] = None
@@ -56,6 +58,7 @@ class AIAgentResponse(BaseModel):
     slug: str
     language: Language
     voice: str
+    gender: str
     provider: AIProvider
     model: str
     prompt: str
