@@ -93,10 +93,17 @@ async def export_calls_csv(
                 data_keys.append(k)
         parsed.append(d)
 
+    # Internal provider costs are visible ONLY to the super admin — never expose
+    # your margin to a client export.
+    from app.db.models.user import UserRole
+
+    show_cost = current_user.role == UserRole.SUPER_ADMIN
+    cost_cols = ["stt_cost", "llm_cost", "tts_cost", "total_cost"] if show_cost else []
+
     base_cols = [
         "id", "direction", "status", "caller_number", "callee_number", "did_number",
         "duration_seconds", "sentiment_score", "disposition",
-        "stt_cost", "llm_cost", "tts_cost", "total_cost",
+        *cost_cols,
         "started_at", "ended_at",
     ]
     header = base_cols + [f"data_{k}" for k in data_keys]
@@ -115,10 +122,15 @@ async def export_calls_csv(
             c.duration_seconds if c.duration_seconds is not None else "",
             f"{c.sentiment_score:.2f}" if c.sentiment_score is not None else "",
             c.disposition or "",
-            f"{c.stt_cost or 0:.6f}",
-            f"{c.llm_cost or 0:.6f}",
-            f"{c.tts_cost or 0:.6f}",
-            f"{c.total_cost or 0:.6f}",
+        ]
+        if show_cost:
+            row += [
+                f"{c.stt_cost or 0:.6f}",
+                f"{c.llm_cost or 0:.6f}",
+                f"{c.tts_cost or 0:.6f}",
+                f"{c.total_cost or 0:.6f}",
+            ]
+        row += [
             c.started_at.isoformat() if c.started_at else "",
             c.ended_at.isoformat() if c.ended_at else "",
         ]
