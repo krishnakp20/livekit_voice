@@ -16,6 +16,7 @@ import WhatsApp from "@/pages/WhatsApp";
 import Integrations from "@/pages/Integrations";
 import ApiKeys from "@/pages/ApiKeys";
 import Settings from "@/pages/Settings";
+import Clients from "@/pages/Clients";
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -50,6 +51,7 @@ export default function App() {
             }
           >
             <Route index element={<Dashboard />} />
+            <Route path="clients" element={<Clients />} />
             <Route path="agents" element={<Agents />} />
             <Route path="sip-trunks" element={<SipTrunks />} />
             <Route path="dispatch" element={<Dispatch />} />

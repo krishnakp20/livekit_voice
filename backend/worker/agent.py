@@ -155,7 +155,8 @@ class DynamicVoiceAgent(Agent):
         self._transfer_number = (getattr(config, "transfer_number", "") or "").strip()
         self._ctx = None          # JobContext — set in entrypoint after creation
         self._sip_identity = None  # SIP participant to transfer — set in entrypoint
-        self._transfer_done = False
+        self._transfer_done = False     # True once a REFER was accepted
+        self._transfer_to = None        # destination URI of a successful transfer
 
         lang_code = language_to_sarvam_code(config.language)
         use_sarvam = config.provider == AIProvider.SARVAM
@@ -411,6 +412,7 @@ class DynamicVoiceAgent(Agent):
             finally:
                 await lkapi.aclose()
 
+            self._transfer_to = transfer_to
             logger.info(
                 "Call transferred: room=%s identity=%s → %s",
                 self._ctx.room.name,
@@ -535,8 +537,15 @@ async def create_call_log(
         return None
 
 
-async def finalize_call_log(room_name: str, *, failed: bool = False, callee_answered: bool = True) -> None:
-    """Mark call completed/failed when LiveKit room ends."""
+async def finalize_call_log(
+    room_name: str,
+    *,
+    failed: bool = False,
+    callee_answered: bool = True,
+    transferred: bool = False,
+    transfer_to: str | None = None,
+) -> None:
+    """Mark call completed/failed/transferred when LiveKit room ends."""
     try:
         from datetime import datetime, timezone
 
@@ -564,7 +573,12 @@ async def finalize_call_log(room_name: str, *, failed: bool = False, callee_answ
             now = datetime.now(timezone.utc)
             # Capture whether callee actually answered BEFORE changing status
             was_active = call.status == CallStatus.ACTIVE
-            call.status = CallStatus.FAILED if failed else CallStatus.COMPLETED
+            if transferred:
+                call.status = CallStatus.TRANSFERRED
+                if transfer_to:
+                    call.disposition = f"Transferred to {transfer_to}"
+            else:
+                call.status = CallStatus.FAILED if failed else CallStatus.COMPLETED
             call.ended_at = now
             started = call.started_at
             if started:
@@ -697,12 +711,19 @@ async def entrypoint(ctx: JobContext):
     # Inbound: caller is already in room → always answered
     # Outbound: only True after wait_for_participant() succeeds (callee picks up)
     callee_answered = {"value": not is_outbound_room}
+    # Holds the agent so the shutdown callback can read transfer state.
+    agent_holder = {"agent": None}
 
     async def _on_call_end(_: str = "") -> None:
+        agent = agent_holder["agent"]
+        transferred = bool(getattr(agent, "_transfer_done", False)) if agent else False
+        transfer_to = getattr(agent, "_transfer_to", None) if agent else None
         await finalize_call_log(
             ctx.room.name,
             failed=session_failed["value"],
             callee_answered=callee_answered["value"],
+            transferred=transferred,
+            transfer_to=transfer_to,
         )
         # Compute + store STT/LLM/TTS cost from accumulated usage
         if call_id:
@@ -808,6 +829,7 @@ async def entrypoint(ctx: JobContext):
         logger.info("Personalised greeting for lead=%r: %r", lead_name, greeting)
 
     voice_agent = DynamicVoiceAgent(config, greeting, lead_name=lead_name)
+    agent_holder["agent"] = voice_agent  # let _on_call_end read transfer state
 
     from app.services.phone_utils import sip_participant_identity
 

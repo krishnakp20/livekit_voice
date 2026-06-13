@@ -7,6 +7,9 @@ from app.db.models.ai_agent import AIProvider, Language
 
 
 class AIAgentCreate(BaseModel):
+    # Super admin only: target client for the new agent. Ignored for client admins
+    # (their own client_id is always used).
+    client_id: Optional[int] = None
     name: str
     language: Language = Language.HINGLISH
     voice: str = "simran"

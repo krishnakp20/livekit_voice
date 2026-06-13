@@ -2,6 +2,7 @@ import { cn } from "@/lib/utils";
 import {
   BarChart3,
   Bot,
+  Building2,
   CreditCard,
   GitBranch,
   Key,
@@ -16,6 +17,7 @@ import {
   Webhook,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
@@ -35,6 +37,13 @@ const navItems = [
 ];
 
 export function Sidebar() {
+  const { user } = useAuth();
+  // Super admin gets the Clients page at the top of the nav.
+  const items =
+    user?.role === "super_admin"
+      ? [{ to: "/clients", icon: Building2, label: "Clients" }, ...navItems]
+      : navItems;
+
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-slate-200 bg-white">
       <div className="flex h-16 items-center gap-2 border-b border-slate-100 px-6">
@@ -44,7 +53,7 @@ export function Sidebar() {
         <span className="text-lg font-bold text-slate-900">VBots</span>
       </div>
       <nav className="flex-1 overflow-y-auto p-4 space-y-1">
-        {navItems.map(({ to, icon: Icon, label }) => (
+        {items.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}

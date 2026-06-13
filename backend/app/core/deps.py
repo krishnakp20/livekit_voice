@@ -1,6 +1,6 @@
 from typing import Annotated, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,7 @@ security = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
@@ -30,6 +31,17 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    # ── Super-admin client context switch ──────────────────────────────────
+    # A SUPER_ADMIN can "act as" any client by sending the X-Client-Id header
+    # (set by the frontend's client switcher). We override client_id IN MEMORY
+    # only — detach from the session first so it is NEVER persisted to the DB.
+    if user.role == UserRole.SUPER_ADMIN:
+        override = request.headers.get("X-Client-Id")
+        if override and override.isdigit():
+            db.expunge(user)  # detach: changes below won't be flushed/committed
+            user.client_id = int(override)
+
     return user
 
 

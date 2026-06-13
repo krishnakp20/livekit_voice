@@ -19,6 +19,11 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // Super-admin client switcher: tell the backend which client to act as.
+  const clientId = localStorage.getItem("active_client_id");
+  if (clientId) {
+    config.headers["X-Client-Id"] = clientId;
+  }
   return config;
 });
 
@@ -40,6 +45,10 @@ export const login = (email: string, password: string) =>
   api.post("/auth/login", { email, password });
 
 export const getMe = () => api.get("/auth/me");
+
+// Clients (super admin)
+export const getClients = () => api.get("/clients");
+export const createClient = (data: Record<string, unknown>) => api.post("/clients", data);
 
 // Agents
 export const getAgents = () => api.get("/agents");

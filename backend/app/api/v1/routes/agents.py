@@ -25,10 +25,22 @@ async def list_agents(db: DbSession, current_user: CurrentUser):
 
 @router.post("", response_model=AIAgentResponse, status_code=status.HTTP_201_CREATED)
 async def create_agent(data: AIAgentCreate, db: DbSession, current_user: AdminUser):
+    payload = data.model_dump()
+    requested_client_id = payload.pop("client_id", None)
+
+    # Use the explicit body client_id if given, else the user's (effective)
+    # client_id — which for a super admin is set by the X-Client-Id header.
+    client_id = requested_client_id or current_user.client_id
+    if client_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No client selected. Pick a client first (super admin) or provide client_id.",
+        )
+
     agent = AIAgent(
-        client_id=current_user.client_id,
+        client_id=client_id,
         slug=_slugify(data.name),
-        **data.model_dump(),
+        **payload,
     )
     db.add(agent)
     await db.flush()
