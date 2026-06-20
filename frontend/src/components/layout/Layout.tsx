@@ -63,9 +63,9 @@ export function Layout() {
   };
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-slate-50">
       <Sidebar />
-      <div className="pl-64">
+      <div className="pl-60">
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/80 backdrop-blur px-8">
           <h1 className="text-sm text-slate-500">AI Voice Calling Platform</h1>
           <div className="flex items-center gap-4">

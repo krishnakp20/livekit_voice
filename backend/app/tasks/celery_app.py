@@ -20,9 +20,12 @@ celery_app.conf.update(
             "task": "app.tasks.whatsapp_tasks.send_daily_reports",
             "schedule": crontab(hour=9, minute=0),
         },
+        # Auto-dialer: top up RUNNING campaigns to their dial_rate every 20s.
+        # Concurrency-aware (dial_campaign_leads only dials dial_rate - in_flight),
+        # so this keeps the pipeline full and auto-completes when leads run out.
         "process-campaign-dials": {
             "task": "app.tasks.campaign_tasks.process_scheduled_campaigns",
-            "schedule": crontab(minute="*/5"),
+            "schedule": 20.0,
         },
     },
 )

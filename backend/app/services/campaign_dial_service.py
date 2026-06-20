@@ -8,7 +8,7 @@ import re
 import uuid
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.call_log import CallDirection, CallLog, CallStatus
@@ -68,7 +68,27 @@ async def dial_campaign_leads(
     if campaign.status != CampaignStatus.RUNNING:
         raise ValueError("Campaign must be RUNNING to dial leads")
 
-    batch = limit if limit is not None else max(1, campaign.dial_rate)
+    # ── Concurrency-aware batch size ────────────────────────────────────────
+    # Auto-dialer goal: keep exactly `dial_rate` calls in progress at once.
+    # in_flight = leads currently being called (status DIALING). We only top up
+    # the difference, so as calls finish, the next leads are dialed — until none
+    # remain, then the campaign auto-completes.
+    in_flight = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(Lead)
+            .where(Lead.campaign_id == campaign.id, Lead.status == LeadStatus.DIALING)
+        )
+        or 0
+    )
+    if limit is not None:
+        batch = limit
+    else:
+        batch = max(0, max(1, campaign.dial_rate) - in_flight)
+
+    if batch <= 0:
+        return {"dialed": 0, "message": f"At capacity ({in_flight} calls in progress)"}
+
     leads_result = await db.execute(
         select(Lead)
         .where(Lead.campaign_id == campaign.id, Lead.status == LeadStatus.NEW)
@@ -77,7 +97,13 @@ async def dial_campaign_leads(
     )
     leads = leads_result.scalars().all()
     if not leads:
-        return {"dialed": 0, "message": "No new leads to dial"}
+        # No NEW leads left. If nothing is in flight either, the campaign is done.
+        if in_flight == 0:
+            campaign.status = CampaignStatus.COMPLETED
+            await db.commit()
+            logger.info("Campaign %s auto-completed — all leads dialed", campaign.id)
+            return {"dialed": 0, "message": "Campaign completed — all leads dialed"}
+        return {"dialed": 0, "message": f"No new leads; {in_flight} calls still in progress"}
 
     trunk_id = await get_outbound_livekit_trunk_id(db, campaign.client_id)
     dialed = 0

@@ -45,6 +45,10 @@ export const login = (email: string, password: string) =>
   api.post("/auth/login", { email, password });
 
 export const getMe = () => api.get("/auth/me");
+export const forgotPassword = (email: string) =>
+  api.post("/auth/forgot-password", { email });
+export const resetPassword = (token: string, new_password: string) =>
+  api.post("/auth/reset-password", { token, new_password });
 
 // Clients (super admin)
 export const getClients = () => api.get("/clients");
@@ -119,6 +123,8 @@ export const getDashboardStats = (days = 30) =>
   api.get("/analytics/dashboard", { params: { days } });
 export const getAgentPerformance = (days = 30) =>
   api.get("/analytics/agents", { params: { days } });
+export const getCampaignPerformance = () => api.get("/analytics/campaigns");
+export const getSystemHealth = () => api.get("/analytics/health");
 
 // Integrations & WhatsApp
 export const getIntegrations = () => api.get("/integrations");

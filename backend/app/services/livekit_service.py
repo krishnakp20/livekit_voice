@@ -154,7 +154,7 @@ class LiveKitService:
             room_config=self._room_config_with_agent(agent_metadata),
         )
         if inbound_numbers:
-            request.inbound_numbers = inbound_numbers
+            request.inbound_numbers.extend(inbound_numbers)
         result = await self.lkapi.sip.create_sip_dispatch_rule(request)
         return result.sip_dispatch_rule_id
 

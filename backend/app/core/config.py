@@ -85,6 +85,18 @@ class Settings(BaseSettings):
     LIVEKIT_EGRESS_OUTPUT_DIR: str = ""
     UPLOADS_PATH: str = "/data/uploads"
 
+    # Email (SMTP) — used for password reset. Set these in .env.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""          # e.g. "VBots <noreply@yourdomain.com>"; defaults to SMTP_USER
+    SMTP_USE_TLS: bool = True
+    # Base URL of the dashboard, used to build the password-reset link in the email.
+    FRONTEND_URL: str = "http://localhost:5173"
+    # How long a password-reset link stays valid.
+    RESET_TOKEN_EXPIRE_MINUTES: int = 30
+
     # WhatsApp (Meta Cloud API)
     WHATSAPP_API_URL: str = "https://graph.facebook.com/v18.0"
     WHATSAPP_PHONE_NUMBER_ID: str = ""
@@ -109,7 +121,10 @@ class Settings(BaseSettings):
         "repair, warranty, price, model, capacity, kW, kVA. "
         "Transcribe exactly what the caller said; do not guess unrelated words."
     )
-    AGENT_PREEMPTIVE_GENERATION: bool = False
+    # Preemptive generation: start the LLM on the interim transcript (before end-of-turn
+    # is confirmed) so the reply is already streaming when the user stops. This OVERLAPS
+    # LLM latency with the endpointing wait → key lever for sub-900ms response.
+    AGENT_PREEMPTIVE_GENERATION: bool = True
     # Turn detection mode for AgentSession (livekit-agents v1.5+):
     #   "stt"  — STT final transcript drives EOU (Deepgram endpointing_ms=100). NOT affected by
     #            SIP background noise. Fastest + most reliable on noisy phone lines. (recommended)

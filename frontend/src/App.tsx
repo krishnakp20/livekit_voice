@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { Layout } from "@/components/layout/Layout";
 import Login from "@/pages/Login";
+import ResetPassword from "@/pages/ResetPassword";
 import Dashboard from "@/pages/Dashboard";
 import Agents from "@/pages/Agents";
 import SipTrunks from "@/pages/SipTrunks";
@@ -42,6 +43,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route
             path="/"
             element={
@@ -54,6 +56,8 @@ export default function App() {
             <Route path="clients" element={<Clients />} />
             <Route path="agents" element={<Agents />} />
             <Route path="sip-trunks" element={<SipTrunks />} />
+            <Route path="phone-numbers" element={<SipTrunks />} />
+            <Route path="reports" element={<Analytics />} />
             <Route path="dispatch" element={<Dispatch />} />
             <Route path="campaigns" element={<Campaigns />} />
             <Route path="leads" element={<Leads />} />
