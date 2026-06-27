@@ -1,8 +1,16 @@
 # Worker-specific LiveKit dependencies — install in addition to backend/requirements.txt
 # pip install -r backend/requirements.txt -r backend/worker/requirements.txt
-livekit-agents[silero]>=1.5,<2.0
-livekit-plugins-openai>=1.5,<2.0
-livekit-plugins-sarvam>=1.5,<2.0
-livekit-plugins-groq>=1.5,<2.0
-livekit-plugins-deepgram>=1.5,<2.0
-livekit-plugins-cartesia>=1.5,<2.0
+#
+# PINNED — do NOT loosen. `build --no-cache` with unpinned ranges pulled a newer
+# onnxruntime whose device-discovery code crashes the forked agent subprocess on
+# Azure/Hyper-V VMs (EOFError in the multiprocessing forkserver). These exact
+# versions are the known-good set.
+livekit-agents[silero]==1.5.15
+livekit-plugins-openai==1.5.15
+livekit-plugins-sarvam==1.5.15
+livekit-plugins-groq==1.5.15
+livekit-plugins-deepgram==1.5.15
+livekit-plugins-cartesia==1.5.15
+# Silero VAD runs on onnxruntime. 1.20+ added device-discovery (device_discovery.cc)
+# that segfaults the forked child on this VM. 1.19.2 is the last safe release.
+onnxruntime==1.19.2
