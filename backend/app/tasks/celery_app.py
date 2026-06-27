@@ -7,6 +7,11 @@ celery_app = Celery(
     "vbots",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
+    # Explicitly import the task modules so @celery_app.task registers them.
+    # autodiscover_tasks(["app.tasks"]) only looks for app/tasks/tasks.py (which
+    # doesn't exist) — our tasks live in campaign_tasks.py / whatsapp_tasks.py,
+    # so without this the worker registers ZERO tasks and discards every dial job.
+    include=["app.tasks.campaign_tasks", "app.tasks.whatsapp_tasks"],
 )
 
 celery_app.conf.update(
