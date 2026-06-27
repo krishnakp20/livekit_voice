@@ -29,6 +29,7 @@ class AIAgentCreate(BaseModel):
     business_hours_json: Optional[str] = None
     transfer_rules_json: Optional[str] = None
     data_fields_json: Optional[str] = None
+    required_lead_fields: Optional[str] = None
 
 
 class AIAgentUpdate(BaseModel):
@@ -51,6 +52,7 @@ class AIAgentUpdate(BaseModel):
     business_hours_json: Optional[str] = None
     transfer_rules_json: Optional[str] = None
     data_fields_json: Optional[str] = None
+    required_lead_fields: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -77,6 +79,7 @@ class AIAgentResponse(BaseModel):
     business_hours_json: Optional[str]
     transfer_rules_json: Optional[str]
     data_fields_json: Optional[str]
+    required_lead_fields: Optional[str]
     livekit_agent_id: Optional[str]
     is_active: bool
     created_at: datetime

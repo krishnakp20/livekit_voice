@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import re
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
@@ -10,6 +11,35 @@ from app.db.models.campaign import Lead
 from app.schemas.campaign import LeadCreate, LeadResponse
 
 router = APIRouter()
+
+
+# Columns that have dedicated DB fields — everything else is stored as a per-lead
+# custom field in metadata_json for prompt personalisation ({customer_name}, etc.).
+_RESERVED_COLUMNS = {"phone", "name", "email"}
+
+
+def _norm_key(header: str) -> str:
+    """Normalise a CSV header to a token key: lowercase, spaces/dashes → underscore."""
+    k = (header or "").strip().lstrip("﻿").lower()
+    return re.sub(r"[\s\-]+", "_", k)
+
+
+def _extract_metadata(row: dict) -> dict[str, str]:
+    """Collect every non-reserved column into a {normalised_key: value} dict.
+
+    These become the {tokens} the worker substitutes into the prompt at call time,
+    so any client can define their own fields just by adding CSV columns."""
+    out: dict[str, str] = {}
+    for header, value in row.items():
+        if not header:
+            continue
+        key = _norm_key(header)
+        if key in _RESERVED_COLUMNS or not key:
+            continue
+        val = (value or "").strip()
+        if val:
+            out[key] = val
+    return out
 
 
 def _clean_phone(raw: str) -> str | None:
@@ -125,12 +155,14 @@ async def upload_leads(
             skipped += 1
             continue
 
+        meta = _extract_metadata(row)
         lead = Lead(
             client_id=current_user.client_id,
             campaign_id=campaign_id,
             phone=phone,
             name=(row.get("name") or row.get("Name") or "").strip() or None,
             email=(row.get("email") or row.get("Email") or "").strip() or None,
+            metadata_json=json.dumps(meta, ensure_ascii=False) if meta else None,
         )
         db.add(lead)
         existing_phones.add(phone)  # prevent in-batch duplicates too

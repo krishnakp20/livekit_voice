@@ -21,6 +21,7 @@ interface Agent {
   transfer_enabled: boolean;
   transfer_number: string | null;
   data_fields_json: string | null;
+  required_lead_fields: string | null;
   gender: string;
   is_active: boolean;
 }
@@ -61,6 +62,7 @@ type AgentForm = {
   transfer_enabled: boolean;
   transfer_number: string;
   data_fields_text: string;
+  required_lead_fields: string;
   gender: string;
 };
 
@@ -79,6 +81,7 @@ const defaultForm: AgentForm = {
   transfer_enabled: false,
   transfer_number: "",
   data_fields_text: "name: customer full name\nphone: contact number\ncity: city and state\ncapacity: required inverter capacity\nusage: home / shop / office / factory",
+  required_lead_fields: "",
 };
 
 function agentToForm(agent: Agent): AgentForm {
@@ -97,6 +100,7 @@ function agentToForm(agent: Agent): AgentForm {
     transfer_enabled: agent.transfer_enabled ?? false,
     transfer_number: agent.transfer_number ?? "",
     data_fields_text: fieldsToText(agent.data_fields_json),
+    required_lead_fields: agent.required_lead_fields ?? "",
   };
 }
 
@@ -230,6 +234,20 @@ function AgentFormFields({
           onChange={(e) => setForm({ ...form, data_fields_text: e.target.value })}
         />
       </div>
+      <div className="md:col-span-2 border-t border-slate-200 pt-3">
+        <label className="text-sm text-slate-700">Required lead fields (outbound)</label>
+        <p className="mb-1 text-xs text-slate-400">
+          Comma-separated CSV column names that MUST be present for each lead, e.g.{" "}
+          <code>customer_name, current_plan_name, current_plan_fee, whatsapp_link</code>.
+          Leads missing any of these are skipped at dial time. Use the <code>{"{token}"}</code>{" "}
+          names from your prompt. Leave blank to dial every lead.
+        </p>
+        <Input
+          placeholder="customer_name, current_plan_name, whatsapp_link"
+          value={form.required_lead_fields}
+          onChange={(e) => setForm({ ...form, required_lead_fields: e.target.value })}
+        />
+      </div>
       <div className="md:col-span-2 flex gap-2">
         <Button onClick={onSubmit}>{submitLabel}</Button>
         {onCancel && (
@@ -259,8 +277,12 @@ export default function Agents() {
   }, []);
 
   const toPayload = (form: AgentForm) => {
-    const { data_fields_text, ...rest } = form;
-    return { ...rest, data_fields_json: textToFieldsJson(data_fields_text) };
+    const { data_fields_text, required_lead_fields, ...rest } = form;
+    return {
+      ...rest,
+      data_fields_json: textToFieldsJson(data_fields_text),
+      required_lead_fields: required_lead_fields.trim() || null,
+    };
   };
 
   const handleCreate = async () => {

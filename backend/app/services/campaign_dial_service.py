@@ -11,6 +11,7 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.ai_agent import AIAgent
 from app.db.models.call_log import CallDirection, CallLog, CallStatus
 from app.db.models.campaign import Campaign, CampaignStatus, Lead, LeadStatus
 from app.db.models.sip_trunk import SIPTrunk, TrunkDirection
@@ -106,11 +107,44 @@ async def dial_campaign_leads(
         return {"dialed": 0, "message": f"No new leads; {in_flight} calls still in progress"}
 
     trunk_id = await get_outbound_livekit_trunk_id(db, campaign.client_id)
+
+    # Required per-lead fields for this campaign's agent. A lead missing any of these
+    # is skipped (marked FAILED) so the bot never runs with incomplete personalisation.
+    agent = (
+        await db.execute(select(AIAgent).where(AIAgent.id == campaign.agent_id))
+    ).scalar_one_or_none()
+    required_fields = [
+        f.strip().lower()
+        for f in ((agent.required_lead_fields or "") if agent else "").replace("\n", ",").split(",")
+        if f.strip()
+    ]
+
     dialed = 0
+    skipped_missing = 0
     errors: list[str] = []
     seen_phones: set[str] = set()
 
     for lead in leads:
+        # ── Required-field gate ──────────────────────────────────────────────
+        if required_fields:
+            try:
+                lmeta = json.loads(lead.metadata_json) if lead.metadata_json else {}
+            except (ValueError, TypeError):
+                lmeta = {}
+            missing = [
+                f for f in required_fields
+                if not str(lmeta.get(f, "")).strip()
+            ]
+            if missing:
+                lead.status = LeadStatus.FAILED
+                skipped_missing += 1
+                errors.append(f"lead {lead.id}: missing required field(s): {', '.join(missing)}")
+                logger.warning(
+                    "Campaign %s: skipping lead %s — missing required field(s): %s",
+                    campaign.id, lead.id, ", ".join(missing),
+                )
+                continue
+
         phone = format_phone_for_sip(lead.phone)
         safe_phone = re.sub(r"\D", "", phone)
 
@@ -167,6 +201,7 @@ async def dial_campaign_leads(
     await db.commit()
     return {
         "dialed": dialed,
+        "skipped_missing_fields": skipped_missing,
         "errors": errors,
         "trunk_id": trunk_id,
     }

@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     SARVAM_API_KEY: str = ""
     GROQ_API_KEY: str = ""
     DEFAULT_LLM_MODEL: str = "gpt-4o-mini"
+    # Groq fallback model. llama-3.1-8b-instant is being decommissioned by Groq on
+    # 2026-08-16; openai/gpt-oss-20b is Groq's recommended replacement. Override via
+    # .env (GROQ_MODEL=...) if Groq changes their lineup again.
+    GROQ_MODEL: str = "openai/gpt-oss-20b"
 
     # Storage
     RECORDINGS_PATH: str = "/data/recordings"

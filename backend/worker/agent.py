@@ -16,6 +16,7 @@ How routing works:
 import asyncio
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -143,10 +144,36 @@ def prewarm(proc: JobProcess) -> None:
     )
 
 
+_TOKEN_RE = re.compile(r"\{([a-zA-Z0-9_ ]+)\}")
+
+
+def _personalize(text: str, fields: dict) -> str:
+    """Replace {key} tokens with the lead's field values (case-insensitive).
+
+    Unknown or empty keys collapse to '' so the prompt's own 'if field is empty →
+    fallback' rules fire naturally. Schema-agnostic: works for any client's fields."""
+    if not text or not fields:
+        return text or ""
+    low = {str(k).strip().lower(): ("" if v is None else str(v)) for k, v in fields.items()}
+    return _TOKEN_RE.sub(lambda m: low.get(m.group(1).strip().lower(), ""), text)
+
+
+def _call_data_block(fields: dict) -> str:
+    """Render a 'CALL DATA' block of key: value pairs to append to the prompt, so
+    [square-bracket] script lines also get filled from real data (no guessing)."""
+    items = [f"- {k}: {v}" for k, v in (fields or {}).items() if str(v).strip()]
+    if not items:
+        return ""
+    return (
+        "\n\n━━━ CALL DATA (use these EXACT values for this customer; "
+        "NEVER invent or guess any value not listed here) ━━━\n" + "\n".join(items)
+    )
+
+
 class DynamicVoiceAgent(Agent):
     """Agent built from ai_agents row (prompt, voice, language, provider)."""
 
-    def __init__(self, config, greeting: str, lead_name: str = ""):
+    def __init__(self, config, greeting: str, lead_name: str = "", lead_fields: dict | None = None):
         from app.db.models.ai_agent import AIProvider, Language
         from worker.config_loader import language_to_sarvam_code, voice_to_sarvam_speaker
 
@@ -217,8 +244,13 @@ class DynamicVoiceAgent(Agent):
                 "gayi', 'rahungi'. NEVER use masculine forms like 'kar sakta hoon'.\n"
             )
 
+        # Inject per-lead dynamic fields into the prompt body ({customer_name},
+        # {current_plan_name}, {whatsapp_link}, …) and append a CALL DATA block.
+        base_prompt = _personalize(config.prompt, lead_fields or {})
+        data_block = _call_data_block(lead_fields or {})
+
         phone_prompt = (
-            f"{config.prompt}{name_context}\n\n"
+            f"{base_prompt}{name_context}{data_block}\n\n"
             "PHONE CALL RULES (follow strictly):\n"
             "1. LENGTH: Reply in 1 short sentence (10-15 words). Ask only ONE question "
             "at a time. No lists or long explanations.\n"
@@ -267,9 +299,10 @@ class DynamicVoiceAgent(Agent):
         openai_key = os.getenv("OPENAI_API_KEY", "")
         groq_llm = None
         openai_llm = None
+        groq_model = settings.GROQ_MODEL
         if _GROQ_AVAILABLE and groq_key:
             groq_llm = groq_plugin.LLM(
-                model="llama-3.1-8b-instant",
+                model=groq_model,
                 temperature=float(config.temperature),
                 max_completion_tokens=reply_tokens,
             )
@@ -301,8 +334,9 @@ class DynamicVoiceAgent(Agent):
         elif groq_llm:
             llm = groq_llm
             logger.info(
-                "LLM: Groq llama-3.1-8b-instant (max_tokens=%d) — NO OpenAI fallback "
+                "LLM: Groq %s (max_tokens=%d) — NO OpenAI fallback "
                 "(set OPENAI_API_KEY to avoid silence on 429)",
+                groq_model,
                 reply_tokens,
             )
         else:
@@ -746,6 +780,40 @@ async def entrypoint(ctx: JobContext):
     # Lead name from campaign metadata — used for personalised greeting + LLM context
     lead_name = (room_meta.get("lead_name") or job_meta.get("lead_name") or "").strip()
 
+    # Per-lead dynamic fields for prompt personalisation. Fetched from the lead's
+    # metadata_json (populated from the uploaded CSV's extra columns).
+    lead_fields: dict = {}
+    _lead_id = _meta_int(room_meta, "lead_id") or _meta_int(job_meta, "lead_id")
+    if _lead_id:
+        try:
+            import json as _json
+
+            from sqlalchemy import select as _select
+
+            from app.db.models.campaign import Lead
+            from app.db.session import AsyncSessionLocal
+
+            async with AsyncSessionLocal() as _db:
+                _lead = (
+                    await _db.execute(_select(Lead).where(Lead.id == _lead_id))
+                ).scalar_one_or_none()
+                if _lead:
+                    if _lead.metadata_json:
+                        try:
+                            lead_fields = _json.loads(_lead.metadata_json) or {}
+                        except (ValueError, TypeError):
+                            lead_fields = {}
+                    if not lead_name:
+                        lead_name = (_lead.name or "").strip()
+        except Exception as e:
+            logger.warning("Could not load lead %s metadata: %s", _lead_id, e)
+
+    # Normalise keys + sensible name aliases so {name}/{customer_name} always resolve.
+    lead_fields = {str(k).strip().lower(): v for k, v in (lead_fields or {}).items()}
+    if lead_name:
+        lead_fields.setdefault("name", lead_name)
+        lead_fields.setdefault("customer_name", lead_name)
+
     logger.info(
         "Starting agent id=%s name=%s room=%s language=%s voice=%s lead_name=%r",
         config.id,
@@ -816,19 +884,19 @@ async def entrypoint(ctx: JobContext):
     if call_id:
         attach_call_listeners(session, call_id, config.client_id)
 
-    # Build personalised greeting for outbound calls.
-    # If the stored greeting already has a {name} placeholder use it;
-    # otherwise prepend "Hi {first_name}!" when the lead name is known.
-    greeting = config.greeting
-    if is_outbound_room and lead_name:
-        if "{name}" in greeting:
-            greeting = greeting.replace("{name}", lead_name)
-        else:
-            first_name = lead_name.split()[0]
-            greeting = f"Hi {first_name}! {greeting}"
+    # Build personalised greeting. Substitute {tokens} from the lead's fields first;
+    # if the greeting has NO tokens but we know the lead's name, prepend a friendly
+    # first-name hello (backwards-compatible with greetings that don't use tokens).
+    greeting = config.greeting or ""
+    had_token = "{" in greeting
+    greeting = _personalize(greeting, lead_fields)
+    if is_outbound_room and lead_name and not had_token:
+        first_name = lead_name.split()[0]
+        greeting = f"Hi {first_name}! {greeting}"
+    if lead_fields:
         logger.info("Personalised greeting for lead=%r: %r", lead_name, greeting)
 
-    voice_agent = DynamicVoiceAgent(config, greeting, lead_name=lead_name)
+    voice_agent = DynamicVoiceAgent(config, greeting, lead_name=lead_name, lead_fields=lead_fields)
     agent_holder["agent"] = voice_agent  # let _on_call_end read transfer state
 
     from app.services.phone_utils import sip_participant_identity
