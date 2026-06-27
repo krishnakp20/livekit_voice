@@ -30,6 +30,18 @@ class LiveKitService:
             )
         return self._lkapi
 
+    async def aclose(self) -> None:
+        """Close the cached LiveKitAPI (its aiohttp session). Required in Celery,
+        where each task runs a fresh event loop — a client bound to a previous
+        (now-closed) loop raises 'Event loop is closed'. Call at the end of a task
+        so the next task lazily builds a new client on its own loop."""
+        if self._lkapi is not None:
+            try:
+                await self._lkapi.aclose()
+            except Exception:
+                pass
+            self._lkapi = None
+
     async def create_room(self, room_name: Optional[str] = None) -> str:
         name = room_name or f"call-{uuid.uuid4().hex[:12]}"
         await self.lkapi.room.create_room(api.CreateRoomRequest(name=name))

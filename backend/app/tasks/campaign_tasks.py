@@ -17,6 +17,7 @@ async def _process():
     from app.core.config import settings
     from app.db.models.campaign import Campaign, CampaignStatus
     from app.services.campaign_dial_service import dial_campaign_leads
+    from app.services.livekit_service import livekit_service
 
     # Celery runs asyncio.run() per task → a NEW event loop each time. The shared
     # app engine's connection pool is bound to a different loop, which raises
@@ -40,4 +41,7 @@ async def _process():
                         "Scheduled dial failed campaign_id=%s", campaign.id
                     )
     finally:
+        # Close the LiveKit client on THIS loop before it closes, so the next
+        # task doesn't inherit a client bound to a dead loop ("Event loop is closed").
+        await livekit_service.aclose()
         await engine.dispose()
