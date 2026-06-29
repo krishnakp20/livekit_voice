@@ -1,4 +1,4 @@
-"""Persist agent session recordings (LiveKit Agents built-in session recording).
+"""Persist agent sessions recordings (LiveKit Agents built-in session recording).
 
 Uses AgentSession.start(record=...) — same approach as the working vbot script.
 Does NOT wrap audio after start (that breaks SIP) and does NOT require LiveKit Egress.
