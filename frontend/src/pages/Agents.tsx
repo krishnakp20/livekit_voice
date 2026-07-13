@@ -133,11 +133,18 @@ function AgentFormFields({
         <option value="sarvam">Sarvam</option>
         <option value="openai">OpenAI</option>
       </Select>
-      <Input
-        placeholder="Voice (e.g. simran)"
-        value={form.voice}
-        onChange={(e) => setForm({ ...form, voice: e.target.value })}
-      />
+      <div>
+        <label className="text-xs font-medium text-slate-500 mb-1 block">Voice</label>
+        <Input
+          placeholder="Cartesia voice ID (UUID) or Sarvam name (e.g. simran)"
+          value={form.voice}
+          onChange={(e) => setForm({ ...form, voice: e.target.value })}
+        />
+        <p className="mt-1 text-xs text-slate-400">
+          Paste a Cartesia voice UUID from cartesia.ai/voices for a custom voice — e.g. a
+          British-English voice for a UK client. Leave a name like <code>simran</code> for the default.
+        </p>
+      </div>
       <Select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
         <option value="female">Female (uses feminine Hindi grammar)</option>
         <option value="male">Male (uses masculine Hindi grammar)</option>
