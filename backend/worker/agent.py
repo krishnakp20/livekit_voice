@@ -170,6 +170,25 @@ def _call_data_block(fields: dict) -> str:
     )
 
 
+def _provider_lang(config) -> str:
+    """Deepgram/Cartesia language code from the agent's `language` field.
+    English (en-*) → 'en' (works for UK/US/Indian English — the accent comes from
+    the chosen voice); Hindi/Hinglish → 'hi'. Lets each client run its own language."""
+    val = getattr(config.language, "value", str(config.language))
+    return "en" if str(val).lower().startswith("en") else "hi"
+
+
+def _cartesia_voice_for(config) -> str:
+    """Per-agent Cartesia voice. If the agent's `voice` field holds a Cartesia voice
+    ID (a UUID — e.g. a British-English voice for the UK client), use it; otherwise
+    fall back to the global CARTESIA_VOICE_ID. This is how each client gets its own
+    voice/tone without a schema change — just set `voice` to a Cartesia voice UUID."""
+    v = (getattr(config, "voice", "") or "").strip()
+    if len(v) >= 32 and v.count("-") >= 4:  # looks like a Cartesia voice UUID
+        return v
+    return settings.CARTESIA_VOICE_ID or os.getenv("CARTESIA_VOICE_ID", "")
+
+
 class DynamicVoiceAgent(Agent):
     """Agent built from ai_agents row (prompt, voice, language, provider)."""
 
@@ -187,6 +206,8 @@ class DynamicVoiceAgent(Agent):
 
         lang_code = language_to_sarvam_code(config.language)
         use_sarvam = config.provider == AIProvider.SARVAM
+        # Deepgram/Cartesia language for THIS agent (en for a UK/English client, hi otherwise)
+        provider_lang = _provider_lang(config)
 
         deepgram_key = os.getenv("DEEPGRAM_API_KEY", "")
         if _DEEPGRAM_AVAILABLE and deepgram_key:
@@ -197,14 +218,14 @@ class DynamicVoiceAgent(Agent):
             # sample_rate=8000: MUST stay 8000 — SIP PSTN narrowband.
             stt = deepgram_plugin.STT(
                 model="nova-2",
-                language="hi",
+                language=provider_lang,
                 smart_format=False,
                 punctuate=False,
                 sample_rate=8000,
                 endpointing_ms=50,
                 no_delay=True,
             )
-            logger.info("STT: Deepgram nova-2 (hi, 8kHz, endpointing=50ms)")
+            logger.info("STT: Deepgram nova-2 (%s, 8kHz, endpointing=50ms)", provider_lang)
         elif use_sarvam:
             stt = sarvam.STT(
                 language=lang_code,
@@ -349,18 +370,20 @@ class DynamicVoiceAgent(Agent):
             raise RuntimeError("No LLM configured: set GROQ_API_KEY and/or OPENAI_API_KEY")
 
         cartesia_key = os.getenv("CARTESIA_API_KEY", "")
-        cartesia_voice = settings.CARTESIA_VOICE_ID or os.getenv("CARTESIA_VOICE_ID", "")
+        # Per-agent voice + language → each client can have its own tone (e.g. a
+        # British-English voice for the UK client). Set the agent's `voice` field to a
+        # Cartesia voice UUID and its `language` to English/Hindi/Hinglish in the UI.
+        cartesia_voice = _cartesia_voice_for(config)
         if _CARTESIA_AVAILABLE and cartesia_key and cartesia_voice:
-            # Cartesia sonic-2-multilingual: ~50-100ms TTFB vs Sarvam ~280ms.
-            # Supports Hindi (hi) via the multilingual model.
-            # Pick a voice from cartesia.ai/voices and set CARTESIA_VOICE_ID in .env.
+            # Cartesia sonic-3.5: ~50-100ms TTFB. Supports en (UK/US) and hi.
+            # Pick voices at cartesia.ai/voices; put the UUID in the agent's `voice` field.
             tts = cartesia_plugin.TTS(
                 model="sonic-3.5",
                 voice=cartesia_voice,
-                language="hi",
+                language=provider_lang,
                 sample_rate=settings.AGENT_AUDIO_SAMPLE_RATE,
             )
-            logger.info("TTS: Cartesia sonic-3.5 voice=%s (hi)", cartesia_voice)
+            logger.info("TTS: Cartesia sonic-3.5 voice=%s (%s)", cartesia_voice, provider_lang)
         elif use_sarvam:
             tts = sarvam.TTS(
                 model=settings.AGENT_TTS_MODEL,
