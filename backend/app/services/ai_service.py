@@ -166,7 +166,21 @@ class AIService:
             "- Return a single JSON object with exactly these keys: "
             f"{', '.join(keys)}.\n"
             "- If a field was not mentioned or is unclear, set it to null.\n"
-            "- For phone numbers, return digits only (no spaces).\n"
+            "- ALWAYS write values in ENGLISH. Translate or transliterate Hindi and "
+            "Devanagari into English (कृष्णा → Krishna, दिल्ली → Delhi, "
+            "सोलर पैनल → Solar Panel). NEVER return Devanagari script.\n"
+            "- Convert spoken numbers into digits: 'six forty three' → 643, "
+            "'double nine' → 99, 'ninety two' → 92, 'दस' → 10.\n"
+            "- Phone numbers: digits only, exactly 10 digits for an Indian mobile. "
+            "Rebuild carefully from spoken digits ('double nine' = 99). If the result "
+            "is not 10 digits, return null rather than a wrong number.\n"
+            "- Include the unit when the customer implies one: capacity → '4 kW', "
+            "pump → '5 HP'.\n"
+            "- Format an address as one clean postal line, e.g. "
+            "'643, Ground Floor, Sabkapur, Delhi - 110092'.\n"
+            "- Use Title Case for names, cities and states.\n"
+            "- For any description or summary field, write ONE concise English "
+            "sentence describing what the customer wants.\n"
             "- Do not invent values. Return ONLY the JSON, no extra text."
         )
         messages = [
@@ -174,8 +188,10 @@ class AIService:
             {"role": "user", "content": transcript.strip()[:6000]},
         ]
 
-        client = self._groq or self._openai
-        model = "llama-3.3-70b-versatile" if self._groq else "gpt-4o-mini"
+        # Prefer OpenAI: extraction runs once per call and feeds the CRM push, so a
+        # Groq free-tier 429 here would silently drop the whole payload.
+        client = self._openai or self._groq
+        model = "gpt-4o-mini" if self._openai else "llama-3.3-70b-versatile"
         if not client:
             return {}
 
