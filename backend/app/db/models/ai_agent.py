@@ -58,6 +58,10 @@ class AIAgent(Base):
     # Data-collection fields — JSON array of {"key","description"} the bot should
     # capture from the conversation; extracted from the transcript after each call.
     data_fields_json: Mapped[Optional[str]] = mapped_column(Text)
+    # CRM webhook pushed after each call. JSON: {"url", "headers", "payload_template"}.
+    # payload_template is the CRM's Request Data JSON pasted verbatim — its exact key
+    # names (spaces/caps included) are preserved and filled from the collected data.
+    webhook_json: Mapped[Optional[str]] = mapped_column(Text)
     # Per-lead REQUIRED fields for outbound personalisation. Comma-separated keys
     # (e.g. "customer_name,current_plan_name,whatsapp_link"). A lead missing any of
     # these in its metadata is SKIPPED at dial time (marked FAILED). Optional fields

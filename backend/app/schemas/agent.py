@@ -30,6 +30,7 @@ class AIAgentCreate(BaseModel):
     transfer_rules_json: Optional[str] = None
     data_fields_json: Optional[str] = None
     required_lead_fields: Optional[str] = None
+    webhook_json: Optional[str] = None
 
 
 class AIAgentUpdate(BaseModel):
@@ -53,6 +54,7 @@ class AIAgentUpdate(BaseModel):
     transfer_rules_json: Optional[str] = None
     data_fields_json: Optional[str] = None
     required_lead_fields: Optional[str] = None
+    webhook_json: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -80,6 +82,7 @@ class AIAgentResponse(BaseModel):
     transfer_rules_json: Optional[str]
     data_fields_json: Optional[str]
     required_lead_fields: Optional[str]
+    webhook_json: Optional[str]
     livekit_agent_id: Optional[str]
     is_active: bool
     created_at: datetime

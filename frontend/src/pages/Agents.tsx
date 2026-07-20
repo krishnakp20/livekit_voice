@@ -22,6 +22,7 @@ interface Agent {
   transfer_number: string | null;
   data_fields_json: string | null;
   required_lead_fields: string | null;
+  webhook_json: string | null;
   gender: string;
   is_active: boolean;
 }
@@ -63,6 +64,9 @@ type AgentForm = {
   transfer_number: string;
   data_fields_text: string;
   required_lead_fields: string;
+  webhook_url: string;
+  webhook_headers: string;
+  webhook_template: string;
   gender: string;
 };
 
@@ -82,7 +86,26 @@ const defaultForm: AgentForm = {
   transfer_number: "",
   data_fields_text: "name: customer full name\nphone: contact number\ncity: city and state\ncapacity: required inverter capacity\nusage: home / shop / office / factory",
   required_lead_fields: "",
+  webhook_url: "",
+  webhook_headers: "",
+  webhook_template: "",
 };
+
+/** ai_agents.webhook_json  ⇄  the three UI fields */
+function webhookToForm(json: string | null | undefined) {
+  try {
+    const cfg = JSON.parse(json || "{}");
+    return {
+      webhook_url: cfg.url || "",
+      webhook_headers: cfg.headers ? JSON.stringify(cfg.headers, null, 2) : "",
+      webhook_template: cfg.payload_template
+        ? JSON.stringify(cfg.payload_template, null, 2)
+        : "",
+    };
+  } catch {
+    return { webhook_url: "", webhook_headers: "", webhook_template: "" };
+  }
+}
 
 function agentToForm(agent: Agent): AgentForm {
   return {
@@ -101,6 +124,7 @@ function agentToForm(agent: Agent): AgentForm {
     transfer_number: agent.transfer_number ?? "",
     data_fields_text: fieldsToText(agent.data_fields_json),
     required_lead_fields: agent.required_lead_fields ?? "",
+    ...webhookToForm(agent.webhook_json),
   };
 }
 
@@ -255,6 +279,45 @@ function AgentFormFields({
           onChange={(e) => setForm({ ...form, required_lead_fields: e.target.value })}
         />
       </div>
+      <div className="md:col-span-2 border-t border-slate-200 pt-3">
+        <label className="text-sm text-slate-700">CRM webhook (optional)</label>
+        <p className="mb-1 text-xs text-slate-400">
+          If a URL is set, the data collected on each call is POSTed here after the call ends.
+        </p>
+        <Input
+          placeholder="https://crmapi.example.com/bot/webhook-api"
+          value={form.webhook_url}
+          onChange={(e) => setForm({ ...form, webhook_url: e.target.value })}
+        />
+        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">
+              Request headers (JSON)
+            </label>
+            <Textarea
+              rows={5}
+              placeholder={'{\n  "Content-Type": "application/json",\n  "Auth-Token": "..."\n}'}
+              value={form.webhook_headers}
+              onChange={(e) => setForm({ ...form, webhook_headers: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">
+              Request data template (JSON)
+            </label>
+            <Textarea
+              rows={5}
+              placeholder={'{\n  "Calling Phone no.": "",\n  "City ": "",\n  "PIN": ""\n}'}
+              value={form.webhook_template}
+              onChange={(e) => setForm({ ...form, webhook_template: e.target.value })}
+            />
+            <p className="mt-1 text-xs text-slate-400">
+              Paste the CRM's Request Data exactly. Its field names are kept as-is and
+              filled from the collected data.
+            </p>
+          </div>
+        </div>
+      </div>
       <div className="md:col-span-2 flex gap-2">
         <Button onClick={onSubmit}>{submitLabel}</Button>
         {onCancel && (
@@ -284,11 +347,42 @@ export default function Agents() {
   }, []);
 
   const toPayload = (form: AgentForm) => {
-    const { data_fields_text, required_lead_fields, ...rest } = form;
+    const {
+      data_fields_text,
+      required_lead_fields,
+      webhook_url,
+      webhook_headers,
+      webhook_template,
+      ...rest
+    } = form;
+
+    // Assemble the three webhook inputs into ai_agents.webhook_json.
+    // Throws on malformed JSON so the user gets told instead of silently losing it.
+    let webhook_json: string | null = null;
+    if (webhook_url.trim()) {
+      const cfg: Record<string, unknown> = { url: webhook_url.trim() };
+      if (webhook_headers.trim()) {
+        try {
+          cfg.headers = JSON.parse(webhook_headers);
+        } catch {
+          throw new Error("Webhook request headers must be valid JSON.");
+        }
+      }
+      if (webhook_template.trim()) {
+        try {
+          cfg.payload_template = JSON.parse(webhook_template);
+        } catch {
+          throw new Error("Webhook request data template must be valid JSON.");
+        }
+      }
+      webhook_json = JSON.stringify(cfg);
+    }
+
     return {
       ...rest,
       data_fields_json: textToFieldsJson(data_fields_text),
       required_lead_fields: required_lead_fields.trim() || null,
+      webhook_json,
     };
   };
 
@@ -299,6 +393,8 @@ export default function Agents() {
       setShowCreate(false);
       setCreateForm(defaultForm);
       await load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not save agent.");
     } finally {
       setSaving(false);
     }
@@ -323,6 +419,8 @@ export default function Agents() {
       await updateAgent(editingId, toPayload(editForm));
       setEditingId(null);
       await load();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not save agent.");
     } finally {
       setSaving(false);
     }

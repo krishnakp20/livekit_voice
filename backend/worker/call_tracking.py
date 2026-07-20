@@ -218,6 +218,15 @@ async def extract_and_store_call_data(call_id: int) -> None:
             await db.commit()
             logger.info("Collected data call_id=%s: %s", call_id, data)
 
+            # Push to the client's CRM webhook (no-op when the agent has none).
+            # Wrapped so a CRM outage can never break call teardown.
+            try:
+                from worker.crm_webhook import send_call_webhook
+
+                await send_call_webhook(agent, data, call_id)
+            except Exception as e:
+                logger.warning("CRM webhook dispatch failed call_id=%s: %s", call_id, e)
+
 
 async def refresh_call_sentiment_from_db(call_id: int, client_id: int) -> None:
     """Re-score at hangup from all saved user transcript lines."""
