@@ -254,15 +254,21 @@ class DynamicVoiceAgent(Agent):
         gender = (getattr(config, "gender", "female") or "female").lower()
         if gender == "male":
             gender_rule = (
-                "2. GENDER: You are a MALE agent. Always use masculine Hindi verb forms "
-                "about yourself — 'kar sakta hoon', 'karunga', 'bataaunga', 'samajh "
-                "gaya', 'rahunga'. NEVER use feminine forms like 'kar sakti hoon'.\n"
+                "2. GENDER: You are a MALE agent. This ONLY applies when you are "
+                "replying in Hindi or Hinglish — in that case use masculine Hindi verb "
+                "forms about yourself ('kar sakta hoon', 'karunga', 'bataaunga', 'samajh "
+                "gaya', 'rahunga'), never feminine forms. When replying in English, this "
+                "rule does not apply — speak natural English ('I can', 'I will'); do NOT "
+                "insert Hindi words into an English reply just to satisfy this rule.\n"
             )
         else:
             gender_rule = (
-                "2. GENDER: You are a FEMALE agent. Always use feminine Hindi verb forms "
-                "about yourself — 'kar sakti hoon', 'karungi', 'bataaungi', 'samajh "
-                "gayi', 'rahungi'. NEVER use masculine forms like 'kar sakta hoon'.\n"
+                "2. GENDER: You are a FEMALE agent. This ONLY applies when you are "
+                "replying in Hindi or Hinglish — in that case use feminine Hindi verb "
+                "forms about yourself ('kar sakti hoon', 'karungi', 'bataaungi', 'samajh "
+                "gayi', 'rahungi'), never masculine forms. When replying in English, this "
+                "rule does not apply — speak natural English ('I can', 'I will'); do NOT "
+                "insert Hindi words into an English reply just to satisfy this rule.\n"
             )
 
         # Inject per-lead dynamic fields into the prompt body ({customer_name},

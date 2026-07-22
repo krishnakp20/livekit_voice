@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -163,6 +164,32 @@ async def _update_call_sentiment(call_id: int, client_id: int, caller_lines: lis
     return score
 
 
+_PHONE_KEY_RE = re.compile(r"phone|mobile|contact.*no|calling.*no", re.IGNORECASE)
+
+
+def _overwrite_phone_fields_with_caller_id(data: dict, fields: list, call) -> None:
+    """Replace any phone-like extracted field with the actual SIP caller/callee number.
+
+    The LLM extracts phone numbers by parsing spoken digits from the transcript
+    ("double nine double one...") which is unreliable and pointless — the real
+    number is already known from the SIP call itself. Whichever field name the
+    client's CRM uses (Calling Phone no., Contact Number, Mobile, ...), if its
+    normalised key looks like a phone field, overwrite it with the true number."""
+    raw = call.caller_number if call.direction.value == "inbound" else call.callee_number
+    if not raw:
+        return
+    digits = re.sub(r"\D", "", raw).lstrip("0")
+    # Store as a plain 10-digit Indian mobile (matches what the CRM/template expects).
+    real_phone = digits[-10:] if len(digits) >= 10 else digits
+    if not real_phone:
+        return
+
+    for f in fields:
+        key = f.get("key")
+        if key and _PHONE_KEY_RE.search(key):
+            data[key] = real_phone
+
+
 async def extract_and_store_call_data(call_id: int) -> None:
     """At call end: extract the agent's configured fields from the transcript → JSON.
 
@@ -214,6 +241,7 @@ async def extract_and_store_call_data(call_id: int) -> None:
 
         data = await ai_service.extract_call_data(transcript, fields)
         if data:
+            _overwrite_phone_fields_with_caller_id(data, fields, call)
             call.collected_data = _json.dumps(data, ensure_ascii=False)
             await db.commit()
             logger.info("Collected data call_id=%s: %s", call_id, data)
