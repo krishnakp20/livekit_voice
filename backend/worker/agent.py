@@ -415,21 +415,6 @@ class DynamicVoiceAgent(Agent):
         self._greeting = greeting
         self._interruptions = config.interruptions_enabled
 
-    async def stt_node(self, audio, model_settings):
-        # Romanize any Devanagari in the STT output before it reaches the LLM's
-        # chat context. Deepgram nova-2 transcribes Hindi words in Devanagari and
-        # English words in Latin script in the SAME line — a lone Devanagari word
-        # in an otherwise-English sentence was biasing the LLM's language
-        # judgment toward Hindi (see LANGUAGE rule in the system prompt). This
-        # does not change what was transcribed, only the script it's presented
-        # in — nova-2's transcription accuracy is untouched.
-        from worker.transliterate import romanize
-
-        async for event in Agent.default.stt_node(self, audio, model_settings):
-            for alt in event.alternatives:
-                alt.text = romanize(alt.text)
-            yield event
-
     async def on_enter(self):
         await self.session.say(self._greeting)
 
