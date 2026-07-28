@@ -65,7 +65,6 @@ type AgentForm = {
   name: string;
   language: string;
   voice: string;
-  provider: string;
   model: string;
   prompt: string;
   greeting: string;
@@ -99,7 +98,6 @@ const defaultForm: AgentForm = {
   language: "hi-en",
   voice: "simran",
   gender: "female",
-  provider: "sarvam",
   model: "gpt-4o-mini",
   prompt: "You are a friendly Indian sales agent.",
   greeting: "Namaste! Kaise madad kar sakti hoon?",
@@ -146,7 +144,6 @@ function agentToForm(agent: Agent): AgentForm {
     language: agent.language,
     voice: agent.voice,
     gender: agent.gender ?? "female",
-    provider: agent.provider,
     model: agent.model,
     prompt: agent.prompt,
     greeting: agent.greeting,
@@ -194,10 +191,6 @@ function AgentFormFields({
         <option value="en-IN">English</option>
         <option value="hi-IN">Hindi</option>
         <option value="hi-en">Hinglish</option>
-      </Select>
-      <Select value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })}>
-        <option value="sarvam">Sarvam</option>
-        <option value="openai">OpenAI</option>
       </Select>
       <div>
         <label className="text-xs font-medium text-slate-500 mb-1 block">Voice</label>
@@ -659,7 +652,7 @@ export default function Agents() {
                     <Badge status={agent.is_active ? "active" : "inactive"} />
                   </div>
                   <p className="text-sm text-slate-500 mt-1">
-                    {agent.language} · {agent.voice} · {agent.provider} · {agent.model}
+                    {agent.language} · {agent.voice} · {agent.model}
                   </p>
                   <p className="text-sm text-slate-400 mt-1 italic line-clamp-2">"{agent.greeting}"</p>
                 </div>
