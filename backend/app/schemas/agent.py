@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.db.models.ai_agent import AIProvider, Language
 
@@ -31,6 +31,16 @@ class AIAgentCreate(BaseModel):
     data_fields_json: Optional[str] = None
     required_lead_fields: Optional[str] = None
     webhook_json: Optional[str] = None
+    # Explicit provider selection. Leave unset (None) to use the server's default
+    # priority-chain behaviour. *_api_key here is the PLAINTEXT key — it is
+    # encrypted before storage and never echoed back in responses. Blank/omitted
+    # key = use the company's global key for that provider.
+    stt_provider: Optional[str] = None
+    stt_api_key: Optional[str] = None
+    llm_provider: Optional[str] = None
+    llm_api_key: Optional[str] = None
+    tts_provider: Optional[str] = None
+    tts_api_key: Optional[str] = None
 
 
 class AIAgentUpdate(BaseModel):
@@ -55,6 +65,12 @@ class AIAgentUpdate(BaseModel):
     data_fields_json: Optional[str] = None
     required_lead_fields: Optional[str] = None
     webhook_json: Optional[str] = None
+    stt_provider: Optional[str] = None
+    stt_api_key: Optional[str] = None
+    llm_provider: Optional[str] = None
+    llm_api_key: Optional[str] = None
+    tts_provider: Optional[str] = None
+    tts_api_key: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -83,11 +99,23 @@ class AIAgentResponse(BaseModel):
     data_fields_json: Optional[str]
     required_lead_fields: Optional[str]
     webhook_json: Optional[str]
+    stt_provider: Optional[str]
+    stt_api_key: Optional[str]   # masked below — never the real (encrypted) value
+    llm_provider: Optional[str]
+    llm_api_key: Optional[str]   # masked
+    tts_provider: Optional[str]
+    tts_api_key: Optional[str]   # masked
     livekit_agent_id: Optional[str]
     is_active: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("stt_api_key", "llm_api_key", "tts_api_key", mode="after")
+    @classmethod
+    def _mask_api_key(cls, v: Optional[str]) -> Optional[str]:
+        """Never return the encrypted value — just indicate whether a key is set."""
+        return "••••••••" if v else None
 
 
 class AgentTestRequest(BaseModel):

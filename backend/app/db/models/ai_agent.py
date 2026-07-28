@@ -68,6 +68,18 @@ class AIAgent(Base):
     # left out here blank out in the prompt and trigger the prompt's own fallback.
     required_lead_fields: Mapped[Optional[str]] = mapped_column(Text)
 
+    # Explicit per-agent STT/LLM/TTS provider selection. NULL on any of these means
+    # "use the server's default priority-chain behaviour" (today's Deepgram/OpenAI/
+    # Cartesia-if-configured logic) — existing agents are unaffected until someone
+    # explicitly sets these. *_api_key values are Fernet-encrypted (app/core/crypto.py);
+    # blank/NULL means "use the company's global key for that provider".
+    stt_provider: Mapped[Optional[str]] = mapped_column(String(20))   # "deepgram" | "sarvam"
+    stt_api_key: Mapped[Optional[str]] = mapped_column(Text)
+    llm_provider: Mapped[Optional[str]] = mapped_column(String(20))   # "openai" | "groq"
+    llm_api_key: Mapped[Optional[str]] = mapped_column(Text)
+    tts_provider: Mapped[Optional[str]] = mapped_column(String(20))   # "cartesia" | "sarvam" | "elevenlabs"
+    tts_api_key: Mapped[Optional[str]] = mapped_column(Text)
+
     # LiveKit
     livekit_agent_id: Mapped[Optional[str]] = mapped_column(String(255))
 

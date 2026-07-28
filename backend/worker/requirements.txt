@@ -11,6 +11,7 @@ livekit-plugins-sarvam==1.5.15
 livekit-plugins-groq==1.5.15
 livekit-plugins-deepgram==1.5.15
 livekit-plugins-cartesia==1.5.15
+livekit-plugins-elevenlabs==1.5.15
 # Silero VAD runs on onnxruntime. 1.20+ added device-discovery (device_discovery.cc)
 # that segfaults the forked child on this VM. 1.19.2 is the last safe release.
 onnxruntime==1.19.2

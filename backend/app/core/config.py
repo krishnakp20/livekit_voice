@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # Encrypts client-supplied STT/LLM/TTS API keys at rest (app/core/crypto.py).
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    FIELD_ENCRYPTION_KEY: str = ""
 
     # Database (MySQL)
     DATABASE_URL: str = "mysql+aiomysql://vbots:vbots@localhost:3306/vbots?charset=utf8mb4"
