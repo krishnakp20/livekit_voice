@@ -439,9 +439,17 @@ class DynamicVoiceAgent(Agent):
             # Without input_audio_transcription, the caller's speech is never turned
             # into text — transfer keyword detection, transcript logging, and CRM
             # data extraction all silently stop working (they all read the
-            # transcribed text, not raw audio).
+            # transcribed text, not raw audio, and are independent of what the
+            # model itself understood to generate its spoken reply).
+            # language="en" is a documented accuracy aid — short/quiet utterances
+            # (a lone "yes", a brief ack) were otherwise being hallucinated as
+            # random foreign-script text instead of English.
             transcription_kwargs = (
-                {"input_audio_transcription": InputAudioTranscription(model="gpt-4o-mini-transcribe")}
+                {
+                    "input_audio_transcription": InputAudioTranscription(
+                        model="gpt-4o-mini-transcribe", language="en",
+                    )
+                }
                 if InputAudioTranscription is not None
                 else {}
             )
