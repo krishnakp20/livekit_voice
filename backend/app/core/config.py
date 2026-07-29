@@ -160,6 +160,11 @@ class Settings(BaseSettings):
     COST_LLM_INPUT_PER_1M: float = 0.05      # Groq llama-3.1-8b-instant, per 1M input tokens
     COST_LLM_OUTPUT_PER_1M: float = 0.08     # Groq llama-3.1-8b-instant, per 1M output tokens
     COST_TTS_PER_1M_CHARS: float = 40.0      # Cartesia sonic-3.5, per 1M characters
+    # OpenAI Realtime (speech-to-speech) bills audio tokens directly — a different
+    # rate from the text-LLM ones above. Default is the gpt-realtime flagship rate;
+    # gpt-realtime-mini is roughly 1/3 of this — override in .env if you switch.
+    COST_REALTIME_AUDIO_INPUT_PER_1M: float = 32.0
+    COST_REALTIME_AUDIO_OUTPUT_PER_1M: float = 64.0
     COST_CURRENCY: str = "USD"               # label only; rates above are in this currency
 
     # Auto-close DB rows stuck in ringing/active (Live Calls / dashboard)

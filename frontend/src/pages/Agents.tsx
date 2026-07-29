@@ -37,6 +37,7 @@ interface Agent {
 const LLM_MODELS: Record<string, string[]> = {
   openai: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4.1-nano"],
   groq: ["llama-3.3-70b-versatile"],
+  openai_realtime: ["gpt-realtime", "gpt-realtime-1.5", "gpt-realtime-2"],
 };
 
 /** "key: description" per line  ⇄  JSON [{key, description}] */
@@ -195,13 +196,19 @@ function AgentFormFields({
       <div>
         <label className="text-xs font-medium text-slate-500 mb-1 block">Voice</label>
         <Input
-          placeholder="Cartesia voice ID (UUID) or Sarvam name (e.g. simran)"
+          placeholder={
+            form.llm_provider === "openai_realtime"
+              ? "Realtime voice name (e.g. marin, alloy, cedar)"
+              : "Cartesia voice ID (UUID) or Sarvam name (e.g. simran)"
+          }
           value={form.voice}
           onChange={(e) => setForm({ ...form, voice: e.target.value })}
         />
         <p className="mt-1 text-xs text-slate-400">
-          Paste a Cartesia voice UUID from cartesia.ai/voices for a custom voice — e.g. a
-          British-English voice for a UK client. Leave a name like <code>simran</code> for the default.
+          {form.llm_provider === "openai_realtime"
+            ? "OpenAI Realtime voice name — see platform.openai.com/docs for the current list (e.g. marin, alloy, cedar)."
+            : <>Paste a Cartesia voice UUID from cartesia.ai/voices for a custom voice — e.g. a
+              British-English voice for a UK client. Leave a name like <code>simran</code> for the default.</>}
         </p>
       </div>
       <Select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
@@ -222,10 +229,11 @@ function AgentFormFields({
           ElevenLabs or Cartesia account).
         </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
+          <div className={form.llm_provider === "openai_realtime" ? "opacity-40" : undefined}>
             <label className="text-xs font-medium text-slate-500 mb-1 block">STT Provider</label>
             <Select
               value={form.stt_provider}
+              disabled={form.llm_provider === "openai_realtime"}
               onChange={(e) => setForm({ ...form, stt_provider: e.target.value })}
             >
               <option value="">Default</option>
@@ -235,6 +243,7 @@ function AgentFormFields({
             <Input
               type="password"
               className="mt-2"
+              disabled={form.llm_provider === "openai_realtime"}
               placeholder={form.stt_key_is_set ? "Key is set — enter to replace" : "API key (optional)"}
               value={form.stt_api_key}
               onChange={(e) => setForm({ ...form, stt_api_key: e.target.value })}
@@ -254,7 +263,14 @@ function AgentFormFields({
               <option value="">Default</option>
               <option value="openai">OpenAI</option>
               <option value="groq">Groq</option>
+              <option value="openai_realtime">OpenAI Realtime (Speech-to-Speech)</option>
             </Select>
+            {form.llm_provider === "openai_realtime" && (
+              <p className="mt-1 text-xs text-slate-400">
+                Speech-to-speech: one model handles listening, thinking, and speaking directly —
+                the STT and TTS providers on the right are ignored for this agent.
+              </p>
+            )}
             {form.llm_provider && LLM_MODELS[form.llm_provider] && (
               <Select
                 className="mt-2"
@@ -275,10 +291,11 @@ function AgentFormFields({
             />
           </div>
 
-          <div>
+          <div className={form.llm_provider === "openai_realtime" ? "opacity-40" : undefined}>
             <label className="text-xs font-medium text-slate-500 mb-1 block">TTS Provider</label>
             <Select
               value={form.tts_provider}
+              disabled={form.llm_provider === "openai_realtime"}
               onChange={(e) => setForm({ ...form, tts_provider: e.target.value })}
             >
               <option value="">Default</option>
@@ -290,6 +307,7 @@ function AgentFormFields({
             <Input
               type="password"
               className="mt-2"
+              disabled={form.llm_provider === "openai_realtime"}
               placeholder={form.tts_key_is_set ? "Key is set — enter to replace" : "API key (optional)"}
               value={form.tts_api_key}
               onChange={(e) => setForm({ ...form, tts_api_key: e.target.value })}

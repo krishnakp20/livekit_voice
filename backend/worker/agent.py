@@ -222,8 +222,17 @@ class DynamicVoiceAgent(Agent):
         # existing agents (no provider explicitly set) are byte-for-byte unaffected.
         explicit_stt = (getattr(config, "stt_provider", None) or "").strip().lower()
         stt_key_override = decrypt_secret(getattr(config, "stt_api_key", None))
+        explicit_llm = (getattr(config, "llm_provider", None) or "").strip().lower()
+        llm_key_override = decrypt_secret(getattr(config, "llm_api_key", None))
+        # OpenAI Realtime (speech-to-speech) replaces STT+LLM+TTS with one model —
+        # it takes the caller's audio directly and speaks back, so the STT/TTS
+        # provider selection below is irrelevant and skipped entirely.
+        use_realtime = explicit_llm == "openai_realtime"
 
-        if explicit_stt == "deepgram" and _DEEPGRAM_AVAILABLE:
+        if use_realtime:
+            stt = None
+            logger.info("STT: skipped — OpenAI Realtime (STS) handles audio directly [explicit]")
+        elif explicit_stt == "deepgram" and _DEEPGRAM_AVAILABLE:
             stt = deepgram_plugin.STT(
                 model="nova-2",
                 language=provider_lang,
@@ -367,9 +376,6 @@ class DynamicVoiceAgent(Agent):
         #   primary = Groq (fast/cheap) — but free tier hits 429 token-rate limits.
         #   fallback = OpenAI — kicks in automatically when Groq errors (429/5xx),
         #   so the bot NEVER goes silent mid-call due to a Groq rate limit.
-        explicit_llm = (getattr(config, "llm_provider", None) or "").strip().lower()
-        llm_key_override = decrypt_secret(getattr(config, "llm_api_key", None))
-
         if explicit_llm in ("openai", "groq"):
             # Explicit provider chosen in the UI: use ONLY that provider, no automatic
             # fallback to the other (the client picked this one deliberately). Falls
@@ -396,6 +402,21 @@ class DynamicVoiceAgent(Agent):
                     "LLM: Groq %s (max_tokens=%d) [explicit]",
                     config.model or settings.GROQ_MODEL, reply_tokens,
                 )
+        elif use_realtime:
+            # Speech-to-speech: one model handles listening + thinking + speaking.
+            # `voice` is repurposed here to hold the Realtime voice name (e.g. "marin",
+            # "alloy", "cedar") instead of a Cartesia/Sarvam voice id.
+            realtime_voice = (config.voice or "").strip() or "marin"
+            realtime_model = (config.model or "").strip() or "gpt-realtime"
+            llm = openai.realtime.RealtimeModel(
+                model=realtime_model,
+                voice=realtime_voice,
+                **({"api_key": llm_key_override} if llm_key_override else {}),
+            )
+            logger.info(
+                "LLM: OpenAI Realtime (STS) model=%s voice=%s [explicit]",
+                realtime_model, realtime_voice,
+            )
         else:
             # === Original fallback chain (unchanged) ===
             groq_key = os.getenv("GROQ_API_KEY", "")
@@ -449,7 +470,10 @@ class DynamicVoiceAgent(Agent):
         tts_key_override = decrypt_secret(getattr(config, "tts_api_key", None))
         cartesia_voice = _cartesia_voice_for(config)
 
-        if explicit_tts == "cartesia" and _CARTESIA_AVAILABLE:
+        if use_realtime:
+            tts = None
+            logger.info("TTS: skipped — OpenAI Realtime (STS) handles audio directly [explicit]")
+        elif explicit_tts == "cartesia" and _CARTESIA_AVAILABLE:
             tts = cartesia_plugin.TTS(
                 model="sonic-3.5",
                 voice=cartesia_voice,
