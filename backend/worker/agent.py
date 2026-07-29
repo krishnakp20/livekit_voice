@@ -83,6 +83,11 @@ try:
 except ImportError:
     _ELEVENLABS_AVAILABLE = False
 
+try:
+    from livekit.plugins.openai.realtime.realtime_model import InputAudioTranscription
+except ImportError:
+    InputAudioTranscription = None
+
 
 from app.core.config import settings
 from app.services.recording_service import recording_path_for_room
@@ -136,6 +141,13 @@ _TRANSFER_KEYWORDS = (
     "senior se",
     "bade officer",
 )
+
+# OpenAI Realtime only accepts these voice names — NOT Cartesia/ElevenLabs voice
+# ids/UUIDs. If an agent's `voice` field still holds a leftover value from a
+# different TTS provider, silently fall back to "marin" rather than 400ing.
+_REALTIME_VOICES = {
+    "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar",
+}
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -405,12 +417,32 @@ class DynamicVoiceAgent(Agent):
         elif use_realtime:
             # Speech-to-speech: one model handles listening + thinking + speaking.
             # `voice` is repurposed here to hold the Realtime voice name (e.g. "marin",
-            # "alloy", "cedar") instead of a Cartesia/Sarvam voice id.
-            realtime_voice = (config.voice or "").strip() or "marin"
+            # "alloy", "cedar") instead of a Cartesia/Sarvam voice id — fall back to
+            # "marin" if it still holds a leftover value from a different provider.
+            raw_voice = (config.voice or "").strip().lower()
+            if raw_voice in _REALTIME_VOICES:
+                realtime_voice = raw_voice
+            else:
+                if raw_voice:
+                    logger.warning(
+                        "Voice %r is not a valid OpenAI Realtime voice (valid: %s) — "
+                        "falling back to 'marin'", config.voice, sorted(_REALTIME_VOICES),
+                    )
+                realtime_voice = "marin"
             realtime_model = (config.model or "").strip() or "gpt-realtime"
+            # Without input_audio_transcription, the caller's speech is never turned
+            # into text — transfer keyword detection, transcript logging, and CRM
+            # data extraction all silently stop working (they all read the
+            # transcribed text, not raw audio).
+            transcription_kwargs = (
+                {"input_audio_transcription": InputAudioTranscription(model="gpt-4o-mini-transcribe")}
+                if InputAudioTranscription is not None
+                else {}
+            )
             llm = openai.realtime.RealtimeModel(
                 model=realtime_model,
                 voice=realtime_voice,
+                **transcription_kwargs,
                 **({"api_key": llm_key_override} if llm_key_override else {}),
             )
             logger.info(
@@ -545,9 +577,20 @@ class DynamicVoiceAgent(Agent):
         super().__init__(instructions=phone_prompt, stt=stt, llm=llm, tts=tts)
         self._greeting = greeting
         self._interruptions = config.interruptions_enabled
+        self._is_realtime = use_realtime
 
     async def on_enter(self):
-        await self.session.say(self._greeting)
+        if self._is_realtime:
+            # OpenAI's Realtime model has no TTS to .say() a fixed line with — ask
+            # it to open the call by speaking this line itself instead.
+            await self.session.generate_reply(
+                instructions=(
+                    f"Start the call now by greeting the caller with this exact line, "
+                    f"word for word: {self._greeting!r}"
+                )
+            )
+        else:
+            await self.session.say(self._greeting)
 
     async def _perform_transfer(self) -> bool:
         """Execute the SIP REFER transfer. Returns True on success."""
