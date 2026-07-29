@@ -84,9 +84,15 @@ except ImportError:
     _ELEVENLABS_AVAILABLE = False
 
 try:
-    from livekit.plugins.openai.realtime.realtime_model import InputAudioTranscription
+    from livekit.plugins.openai.realtime.realtime_model import (
+        InputAudioTranscription,
+        NoiseReduction,
+        TurnDetection,
+    )
 except ImportError:
     InputAudioTranscription = None
+    NoiseReduction = None
+    TurnDetection = None
 
 
 from app.core.config import settings
@@ -439,10 +445,28 @@ class DynamicVoiceAgent(Agent):
                 if InputAudioTranscription is not None
                 else {}
             )
+            # SIP/PSTN phone lines are noisy — without this, static/line noise gets
+            # misread as speech and the model hallucinates unrelated foreign-script
+            # text for it, then reacts to that hallucination as if it were real.
+            # near_field suits a handset held to the ear (vs far_field for a room
+            # mic); raising the VAD threshold above the 0.5 default requires louder,
+            # clearer audio before a turn is triggered at all.
+            noise_kwargs = (
+                {"input_audio_noise_reduction": NoiseReduction(type="near_field")}
+                if NoiseReduction is not None
+                else {}
+            )
+            turn_detection_kwargs = (
+                {"turn_detection": TurnDetection(type="server_vad", threshold=0.6)}
+                if TurnDetection is not None
+                else {}
+            )
             llm = openai.realtime.RealtimeModel(
                 model=realtime_model,
                 voice=realtime_voice,
                 **transcription_kwargs,
+                **noise_kwargs,
+                **turn_detection_kwargs,
                 **({"api_key": llm_key_override} if llm_key_override else {}),
             )
             logger.info(
