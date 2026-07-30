@@ -111,7 +111,10 @@ from worker.recordings import (
     should_record_call,
 )
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG, force=True)
+logging.getLogger().setLevel(logging.DEBUG)
+logging.getLogger("livekit").setLevel(logging.DEBUG)
+logging.getLogger("livekit.agents").setLevel(logging.DEBUG)
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 logger = logging.getLogger("vbots.agent")
 
