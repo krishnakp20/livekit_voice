@@ -615,17 +615,25 @@ class DynamicVoiceAgent(Agent):
         self._is_realtime = use_realtime
 
     async def on_enter(self):
+        logger.info("on_enter: called, is_realtime=%s", self._is_realtime)
         if self._is_realtime:
             # OpenAI's Realtime model has no TTS to .say() a fixed line with — ask
             # it to open the call by speaking this line itself instead.
-            await self.session.generate_reply(
-                instructions=(
-                    f"Start the call now by greeting the caller with this exact line, "
-                    f"word for word: {self._greeting!r}"
+            logger.info("on_enter: calling generate_reply for realtime greeting")
+            try:
+                await self.session.generate_reply(
+                    instructions=(
+                        f"Start the call now by greeting the caller with this exact line, "
+                        f"word for word: {self._greeting!r}"
+                    )
                 )
-            )
+                logger.info("on_enter: generate_reply returned successfully")
+            except Exception:
+                logger.exception("on_enter: generate_reply raised an exception")
+                raise
         else:
             await self.session.say(self._greeting)
+        logger.info("on_enter: finished")
 
     async def _perform_transfer(self) -> bool:
         """Execute the SIP REFER transfer. Returns True on success."""
