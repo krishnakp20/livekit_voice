@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 # backend/ on PYTHONPATH
@@ -115,6 +116,12 @@ logging.basicConfig(level=logging.DEBUG, force=True)
 logging.getLogger().setLevel(logging.DEBUG)
 logging.getLogger("livekit").setLevel(logging.DEBUG)
 logging.getLogger("livekit.agents").setLevel(logging.DEBUG)
+logging.getLogger("livekit.plugins.openai").setLevel(logging.DEBUG)
+logging.getLogger("openai").setLevel(logging.DEBUG)
+logging.getLogger("websockets").setLevel(logging.DEBUG)
+logging.getLogger("websockets.client").setLevel(logging.DEBUG)
+logging.getLogger("httpx").setLevel(logging.DEBUG)
+logging.getLogger("httpcore").setLevel(logging.DEBUG)
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 logger = logging.getLogger("vbots.agent")
 
@@ -620,6 +627,7 @@ class DynamicVoiceAgent(Agent):
             # OpenAI's Realtime model has no TTS to .say() a fixed line with — ask
             # it to open the call by speaking this line itself instead.
             logger.info("on_enter: calling generate_reply for realtime greeting")
+            t0 = time.monotonic()
             try:
                 await self.session.generate_reply(
                     instructions=(
@@ -627,9 +635,15 @@ class DynamicVoiceAgent(Agent):
                         f"word for word: {self._greeting!r}"
                     )
                 )
-                logger.info("on_enter: generate_reply returned successfully")
+                logger.info(
+                    "on_enter: generate_reply returned successfully after %.2fs",
+                    time.monotonic() - t0,
+                )
             except Exception:
-                logger.exception("on_enter: generate_reply raised an exception")
+                logger.exception(
+                    "on_enter: generate_reply raised an exception after %.2fs",
+                    time.monotonic() - t0,
+                )
                 raise
         else:
             await self.session.say(self._greeting)
