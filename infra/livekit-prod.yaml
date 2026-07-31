@@ -24,13 +24,9 @@ keys:
 redis:
   address: 127.0.0.1:6379
 
-sip:
-  enabled: true
-
 turn:
   enabled: true
   domain: 192.168.11.226
-  tls_port: 5349
   udp_port: 3478
   external_tls: false
 
