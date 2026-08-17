@@ -119,8 +119,24 @@ export const fetchCallRecordingBlob = (callId: number) =>
   api.get(`/calls/${callId}/recording/file`, { responseType: "blob" });
 
 // Analytics
+export const getDashboardStatsOld = (days = 30) =>
+  api.get("/analytics/dashboard_old", { params: { days } });
 export const getDashboardStats = (days = 30) =>
   api.get("/analytics/dashboard", { params: { days } });
+export const getCallVolume = (days = 14) =>
+  api.get("/analytics/call-volume", { params: { days } });
+export const getCallOutcome = () =>
+  api.get("/analytics/call-outcome", { });
+export const getAgentPerformanceRanking = () =>
+  api.get("/analytics/agent-performance", { });
+export const getCallDuration = () =>
+  api.get("/analytics/call-duration", { });
+export const getBusinessPerformance = () =>
+  api.get("/analytics/business-performance", { });
+export const getAgentPositiveRate = (days = 30) =>
+  api.get("/analytics/agent-postive-rate", { params: { days } });
+export const getTechnicalMetrics = () =>
+  api.get("/analytics/technical-metrics", { });
 export const getAgentPerformance = (days = 30) =>
   api.get("/analytics/agents", { params: { days } });
 export const getCampaignPerformance = () => api.get("/analytics/campaigns");

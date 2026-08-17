@@ -10,9 +10,41 @@ from app.services.analytics_service import analytics_service
 router = APIRouter()
 
 
+@router.get("/dashboard_old")
+async def dashboard_old(db: DbSession, current_user: CurrentUser, days: int = 30):
+    return await analytics_service.get_dashboard_stats_old(db, current_user.client_id, days)
+
 @router.get("/dashboard")
 async def dashboard(db: DbSession, current_user: CurrentUser, days: int = 30):
     return await analytics_service.get_dashboard_stats(db, current_user.client_id, days)
+
+@router.get("/call-volume")
+async def call_volume(db: DbSession, current_user: CurrentUser, days: int = 14):
+    return await analytics_service.get_call_volume_trend(db, current_user.client_id, days)
+
+@router.get("/call-outcome")
+async def call_outcome(db: DbSession, current_user: CurrentUser):
+    return await analytics_service.get_call_outcome_distribution(db, current_user.client_id)
+
+@router.get("/agent-performance")
+async def agent_performance(db: DbSession, current_user: CurrentUser):
+    return await analytics_service.get_agent_performance_ranking(db, current_user.client_id)
+
+@router.get("/call-duration")
+async def call_duration(db: DbSession, current_user: CurrentUser):
+    return await analytics_service.get_call_duration_analysis(db, current_user.client_id)
+
+@router.get("/business-performance")
+async def business_performance(db: DbSession, current_user: CurrentUser):
+    return await analytics_service.get_business_performance(db, current_user.client_id)
+
+@router.get("/agent-postive-rate")
+async def agent_postive_rate(db: DbSession, current_user: CurrentUser, days: int = 7):
+    return await analytics_service.get_agent_positive_rate(db, current_user.client_id, days)
+
+@router.get("/technical-metrics")
+async def technical_metrics(db: DbSession, current_user: CurrentUser):
+    return await analytics_service.get_technical_metrics(db, current_user.client_id)
 
 
 @router.get("/agents")
