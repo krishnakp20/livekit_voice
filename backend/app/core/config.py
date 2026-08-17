@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # Encrypts client-supplied STT/LLM/TTS API keys at rest (app/core/crypto.py).
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    FIELD_ENCRYPTION_KEY: str = ""
 
     # Database (MySQL)
     DATABASE_URL: str = "mysql+aiomysql://vbots:vbots@localhost:3306/vbots?charset=utf8mb4"
@@ -157,6 +160,11 @@ class Settings(BaseSettings):
     COST_LLM_INPUT_PER_1M: float = 0.05      # Groq llama-3.1-8b-instant, per 1M input tokens
     COST_LLM_OUTPUT_PER_1M: float = 0.08     # Groq llama-3.1-8b-instant, per 1M output tokens
     COST_TTS_PER_1M_CHARS: float = 40.0      # Cartesia sonic-3.5, per 1M characters
+    # OpenAI Realtime (speech-to-speech) bills audio tokens directly — a different
+    # rate from the text-LLM ones above. Default is the gpt-realtime flagship rate;
+    # gpt-realtime-mini is roughly 1/3 of this — override in .env if you switch.
+    COST_REALTIME_AUDIO_INPUT_PER_1M: float = 32.0
+    COST_REALTIME_AUDIO_OUTPUT_PER_1M: float = 64.0
     COST_CURRENCY: str = "USD"               # label only; rates above are in this currency
 
     # Auto-close DB rows stuck in ringing/active (Live Calls / dashboard)

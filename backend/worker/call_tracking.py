@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from livekit.agents.metrics.base import EOUMetrics, LLMMetrics, STTMetrics, TTSMetrics
+from livekit.agents.metrics.base import EOUMetrics, LLMMetrics, RealtimeModelMetrics, STTMetrics, TTSMetrics
 from livekit.agents.voice.events import ConversationItemAddedEvent, MetricsCollectedEvent, UserInputTranscribedEvent
 
 if TYPE_CHECKING:
@@ -24,6 +25,10 @@ class _CallUsage:
     llm_prompt_tokens: int = 0
     llm_completion_tokens: int = 0
     tts_chars: int = 0
+    # Speech-to-speech (OpenAI Realtime) audio tokens — priced separately from the
+    # text-LLM tokens above, so kept in their own bucket rather than mixed in.
+    realtime_input_tokens: int = 0
+    realtime_output_tokens: int = 0
 
 
 # Per-call usage accumulators, keyed by call_id (lives in worker process memory).
@@ -51,6 +56,14 @@ async def persist_call_costs(call_id: int) -> None:
         + usage.llm_completion_tokens / 1_000_000 * settings.COST_LLM_OUTPUT_PER_1M
     )
     tts_cost = usage.tts_chars / 1_000_000 * settings.COST_TTS_PER_1M_CHARS
+    realtime_cost = (
+        usage.realtime_input_tokens / 1_000_000 * settings.COST_REALTIME_AUDIO_INPUT_PER_1M
+        + usage.realtime_output_tokens / 1_000_000 * settings.COST_REALTIME_AUDIO_OUTPUT_PER_1M
+    )
+    # Realtime tokens are folded into the same llm_cost/llm_* columns as text-LLM
+    # tokens (no separate call_logs column) — they're mutually exclusive per call,
+    # so this never double-counts.
+    llm_cost += realtime_cost
     total_cost = stt_cost + llm_cost + tts_cost
 
     try:
@@ -59,8 +72,8 @@ async def persist_call_costs(call_id: int) -> None:
             call = result.scalar_one_or_none()
             if call:
                 call.stt_audio_seconds = round(usage.stt_audio_s, 2)
-                call.llm_prompt_tokens = usage.llm_prompt_tokens
-                call.llm_completion_tokens = usage.llm_completion_tokens
+                call.llm_prompt_tokens = usage.llm_prompt_tokens + usage.realtime_input_tokens
+                call.llm_completion_tokens = usage.llm_completion_tokens + usage.realtime_output_tokens
                 call.tts_characters = usage.tts_chars
                 call.stt_cost = round(stt_cost, 6)
                 call.llm_cost = round(llm_cost, 6)
@@ -163,6 +176,32 @@ async def _update_call_sentiment(call_id: int, client_id: int, caller_lines: lis
     return score
 
 
+_PHONE_KEY_RE = re.compile(r"phone|mobile|contact.*no|calling.*no", re.IGNORECASE)
+
+
+def _overwrite_phone_fields_with_caller_id(data: dict, fields: list, call) -> None:
+    """Replace any phone-like extracted field with the actual SIP caller/callee number.
+
+    The LLM extracts phone numbers by parsing spoken digits from the transcript
+    ("double nine double one...") which is unreliable and pointless — the real
+    number is already known from the SIP call itself. Whichever field name the
+    client's CRM uses (Calling Phone no., Contact Number, Mobile, ...), if its
+    normalised key looks like a phone field, overwrite it with the true number."""
+    raw = call.caller_number if call.direction.value == "inbound" else call.callee_number
+    if not raw:
+        return
+    digits = re.sub(r"\D", "", raw).lstrip("0")
+    # Store as a plain 10-digit Indian mobile (matches what the CRM/template expects).
+    real_phone = digits[-10:] if len(digits) >= 10 else digits
+    if not real_phone:
+        return
+
+    for f in fields:
+        key = f.get("key")
+        if key and _PHONE_KEY_RE.search(key):
+            data[key] = real_phone
+
+
 async def extract_and_store_call_data(call_id: int) -> None:
     """At call end: extract the agent's configured fields from the transcript → JSON.
 
@@ -214,6 +253,7 @@ async def extract_and_store_call_data(call_id: int) -> None:
 
         data = await ai_service.extract_call_data(transcript, fields)
         if data:
+            _overwrite_phone_fields_with_caller_id(data, fields, call)
             call.collected_data = _json.dumps(data, ensure_ascii=False)
             await db.commit()
             logger.info("Collected data call_id=%s: %s", call_id, data)
@@ -303,7 +343,7 @@ def attach_call_listeners(session: AgentSession, call_id: int, client_id: int) -
     def on_metrics(ev: MetricsCollectedEvent) -> None:
         m = ev.metrics
         b = bucket["current"]
-        if b is None and not isinstance(m, (STTMetrics, EOUMetrics)):
+        if b is None and not isinstance(m, (STTMetrics, EOUMetrics, RealtimeModelMetrics)):
             return
 
         if isinstance(m, STTMetrics):
@@ -332,6 +372,17 @@ def attach_call_listeners(session: AgentSession, call_id: int, client_id: int) -
                 b = _new_turn()
             b.record_tts(m.ttfb, m.audio_duration)
             usage.tts_chars += int(getattr(m, "characters_count", 0) or 0)
+        elif isinstance(m, RealtimeModelMetrics):
+            # Speech-to-speech (e.g. OpenAI Realtime): one model replaces STT+LLM+TTS,
+            # so there's no separate stt/llm/tts breakdown — ttft here is time-to-
+            # first-audio, the direct equivalent of the pipeline's after_you_stop.
+            if b is None:
+                b = _new_turn()
+            if m.ttft >= 0:
+                b.llm_ttft_s = m.ttft
+            b.llm_total_s = max(b.llm_total_s, m.duration)
+            usage.llm_prompt_tokens += int(getattr(m, "input_tokens", 0) or 0)
+            usage.llm_completion_tokens += int(getattr(m, "output_tokens", 0) or 0)
 
     @session.on("user_input_transcribed")
     def on_user_transcribed(ev: UserInputTranscribedEvent) -> None:

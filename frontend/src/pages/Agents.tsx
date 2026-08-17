@@ -25,7 +25,20 @@ interface Agent {
   webhook_json: string | null;
   gender: string;
   is_active: boolean;
+  stt_provider: string | null;
+  stt_api_key: string | null;   // masked ("••••••••") when set, never the real key
+  llm_provider: string | null;
+  llm_api_key: string | null;   // masked
+  tts_provider: string | null;
+  tts_api_key: string | null;   // masked
 }
+
+/** Curated, voice-latency-appropriate models per LLM provider (per-agent dropdown). */
+const LLM_MODELS: Record<string, string[]> = {
+  openai: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4.1-nano"],
+  groq: ["llama-3.3-70b-versatile"],
+  openai_realtime: ["gpt-realtime", "gpt-realtime-1.5", "gpt-realtime-2"],
+};
 
 /** "key: description" per line  ⇄  JSON [{key, description}] */
 function fieldsToText(json: string | null | undefined): string {
@@ -53,7 +66,6 @@ type AgentForm = {
   name: string;
   language: string;
   voice: string;
-  provider: string;
   model: string;
   prompt: string;
   greeting: string;
@@ -68,6 +80,18 @@ type AgentForm = {
   webhook_headers: string;
   webhook_template: string;
   gender: string;
+  // Explicit provider overrides — blank = use the server's default (today's
+  // behaviour). *_api_key holds a NEWLY TYPED plaintext key for this edit
+  // session only; it is never pre-filled from the masked stored value.
+  stt_provider: string;
+  stt_api_key: string;
+  stt_key_is_set: boolean;   // true if the server reports one already stored
+  llm_provider: string;
+  llm_api_key: string;
+  llm_key_is_set: boolean;
+  tts_provider: string;
+  tts_api_key: string;
+  tts_key_is_set: boolean;
 };
 
 const defaultForm: AgentForm = {
@@ -75,7 +99,6 @@ const defaultForm: AgentForm = {
   language: "hi-en",
   voice: "simran",
   gender: "female",
-  provider: "sarvam",
   model: "gpt-4o-mini",
   prompt: "You are a friendly Indian sales agent.",
   greeting: "Namaste! Kaise madad kar sakti hoon?",
@@ -89,6 +112,15 @@ const defaultForm: AgentForm = {
   webhook_url: "",
   webhook_headers: "",
   webhook_template: "",
+  stt_provider: "",
+  stt_api_key: "",
+  stt_key_is_set: false,
+  llm_provider: "",
+  llm_api_key: "",
+  llm_key_is_set: false,
+  tts_provider: "",
+  tts_api_key: "",
+  tts_key_is_set: false,
 };
 
 /** ai_agents.webhook_json  ⇄  the three UI fields */
@@ -113,7 +145,6 @@ function agentToForm(agent: Agent): AgentForm {
     language: agent.language,
     voice: agent.voice,
     gender: agent.gender ?? "female",
-    provider: agent.provider,
     model: agent.model,
     prompt: agent.prompt,
     greeting: agent.greeting,
@@ -125,6 +156,15 @@ function agentToForm(agent: Agent): AgentForm {
     data_fields_text: fieldsToText(agent.data_fields_json),
     required_lead_fields: agent.required_lead_fields ?? "",
     ...webhookToForm(agent.webhook_json),
+    stt_provider: agent.stt_provider ?? "",
+    stt_api_key: "",   // never pre-fill a real key from the masked value
+    stt_key_is_set: !!agent.stt_api_key,
+    llm_provider: agent.llm_provider ?? "",
+    llm_api_key: "",
+    llm_key_is_set: !!agent.llm_api_key,
+    tts_provider: agent.tts_provider ?? "",
+    tts_api_key: "",
+    tts_key_is_set: !!agent.tts_api_key,
   };
 }
 
@@ -153,20 +193,22 @@ function AgentFormFields({
         <option value="hi-IN">Hindi</option>
         <option value="hi-en">Hinglish</option>
       </Select>
-      <Select value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })}>
-        <option value="sarvam">Sarvam</option>
-        <option value="openai">OpenAI</option>
-      </Select>
       <div>
         <label className="text-xs font-medium text-slate-500 mb-1 block">Voice</label>
         <Input
-          placeholder="Cartesia voice ID (UUID) or Sarvam name (e.g. simran)"
+          placeholder={
+            form.llm_provider === "openai_realtime"
+              ? "Realtime voice name (e.g. marin, alloy, cedar)"
+              : "Cartesia voice ID (UUID) or Sarvam name (e.g. simran)"
+          }
           value={form.voice}
           onChange={(e) => setForm({ ...form, voice: e.target.value })}
         />
         <p className="mt-1 text-xs text-slate-400">
-          Paste a Cartesia voice UUID from cartesia.ai/voices for a custom voice — e.g. a
-          British-English voice for a UK client. Leave a name like <code>simran</code> for the default.
+          {form.llm_provider === "openai_realtime"
+            ? "OpenAI Realtime voice name — see platform.openai.com/docs for the current list (e.g. marin, alloy, cedar)."
+            : <>Paste a Cartesia voice UUID from cartesia.ai/voices for a custom voice — e.g. a
+              British-English voice for a UK client. Leave a name like <code>simran</code> for the default.</>}
         </p>
       </div>
       <Select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
@@ -178,6 +220,102 @@ function AgentFormFields({
         value={form.model}
         onChange={(e) => setForm({ ...form, model: e.target.value })}
       />
+
+      <div className="md:col-span-2 border-t border-slate-200 pt-3">
+        <label className="text-sm text-slate-700">Explicit provider overrides (optional)</label>
+        <p className="mb-2 text-xs text-slate-400">
+          Leave any of these on "Default" to use the server's standard setup. Pin an
+          explicit provider when a client brings their own API key (e.g. their own
+          ElevenLabs or Cartesia account).
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className={form.llm_provider === "openai_realtime" ? "opacity-40" : undefined}>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">STT Provider</label>
+            <Select
+              value={form.stt_provider}
+              disabled={form.llm_provider === "openai_realtime"}
+              onChange={(e) => setForm({ ...form, stt_provider: e.target.value })}
+            >
+              <option value="">Default</option>
+              <option value="deepgram">Deepgram</option>
+              <option value="sarvam">Sarvam</option>
+            </Select>
+            <Input
+              type="password"
+              className="mt-2"
+              disabled={form.llm_provider === "openai_realtime"}
+              placeholder={form.stt_key_is_set ? "Key is set — enter to replace" : "API key (optional)"}
+              value={form.stt_api_key}
+              onChange={(e) => setForm({ ...form, stt_api_key: e.target.value })}
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">LLM Provider</label>
+            <Select
+              value={form.llm_provider}
+              onChange={(e) => {
+                const provider = e.target.value;
+                const models = LLM_MODELS[provider];
+                setForm({ ...form, llm_provider: provider, model: models ? models[0] : form.model });
+              }}
+            >
+              <option value="">Default</option>
+              <option value="openai">OpenAI</option>
+              <option value="groq">Groq</option>
+              <option value="openai_realtime">OpenAI Realtime (Speech-to-Speech)</option>
+            </Select>
+            {form.llm_provider === "openai_realtime" && (
+              <p className="mt-1 text-xs text-slate-400">
+                Speech-to-speech: one model handles listening, thinking, and speaking directly —
+                the STT and TTS providers on the right are ignored for this agent.
+              </p>
+            )}
+            {form.llm_provider && LLM_MODELS[form.llm_provider] && (
+              <Select
+                className="mt-2"
+                value={form.model}
+                onChange={(e) => setForm({ ...form, model: e.target.value })}
+              >
+                {LLM_MODELS[form.llm_provider].map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </Select>
+            )}
+            <Input
+              type="password"
+              className="mt-2"
+              placeholder={form.llm_key_is_set ? "Key is set — enter to replace" : "API key (optional)"}
+              value={form.llm_api_key}
+              onChange={(e) => setForm({ ...form, llm_api_key: e.target.value })}
+            />
+          </div>
+
+          <div className={form.llm_provider === "openai_realtime" ? "opacity-40" : undefined}>
+            <label className="text-xs font-medium text-slate-500 mb-1 block">TTS Provider</label>
+            <Select
+              value={form.tts_provider}
+              disabled={form.llm_provider === "openai_realtime"}
+              onChange={(e) => setForm({ ...form, tts_provider: e.target.value })}
+            >
+              <option value="">Default</option>
+              <option value="cartesia">Cartesia</option>
+              <option value="sarvam">Sarvam</option>
+              <option value="elevenlabs">ElevenLabs</option>
+            </Select>
+            <p className="mt-1 text-xs text-slate-400">Uses the Voice field above as the voice ID.</p>
+            <Input
+              type="password"
+              className="mt-2"
+              disabled={form.llm_provider === "openai_realtime"}
+              placeholder={form.tts_key_is_set ? "Key is set — enter to replace" : "API key (optional)"}
+              value={form.tts_api_key}
+              onChange={(e) => setForm({ ...form, tts_api_key: e.target.value })}
+            />
+          </div>
+        </div>
+      </div>
+
       <div className="md:col-span-2">
         <label className="text-xs font-medium text-slate-500 mb-1 block">System prompt</label>
         <Textarea
@@ -353,6 +491,15 @@ export default function Agents() {
       webhook_url,
       webhook_headers,
       webhook_template,
+      stt_provider,
+      stt_api_key,
+      stt_key_is_set: _stt_key_is_set,
+      llm_provider,
+      llm_api_key,
+      llm_key_is_set: _llm_key_is_set,
+      tts_provider,
+      tts_api_key,
+      tts_key_is_set: _tts_key_is_set,
       ...rest
     } = form;
 
@@ -383,6 +530,15 @@ export default function Agents() {
       data_fields_json: textToFieldsJson(data_fields_text),
       required_lead_fields: required_lead_fields.trim() || null,
       webhook_json,
+      stt_provider: stt_provider.trim() || null,
+      llm_provider: llm_provider.trim() || null,
+      tts_provider: tts_provider.trim() || null,
+      // Only include *_api_key if the user actually typed a NEW key this
+      // session. Omitting it (rather than sending "") means the backend's
+      // exclude_unset leaves whatever key is already stored untouched.
+      ...(stt_api_key.trim() ? { stt_api_key: stt_api_key.trim() } : {}),
+      ...(llm_api_key.trim() ? { llm_api_key: llm_api_key.trim() } : {}),
+      ...(tts_api_key.trim() ? { tts_api_key: tts_api_key.trim() } : {}),
     };
   };
 
@@ -514,7 +670,7 @@ export default function Agents() {
                     <Badge status={agent.is_active ? "active" : "inactive"} />
                   </div>
                   <p className="text-sm text-slate-500 mt-1">
-                    {agent.language} · {agent.voice} · {agent.provider} · {agent.model}
+                    {agent.language} · {agent.voice} · {agent.model}
                   </p>
                   <p className="text-sm text-slate-400 mt-1 italic line-clamp-2">"{agent.greeting}"</p>
                 </div>

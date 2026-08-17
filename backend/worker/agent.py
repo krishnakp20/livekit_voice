@@ -77,6 +77,23 @@ try:
 except ImportError:
     _CARTESIA_AVAILABLE = False
 
+try:
+    from livekit.plugins import elevenlabs as elevenlabs_plugin
+    _ELEVENLABS_AVAILABLE = True
+except ImportError:
+    _ELEVENLABS_AVAILABLE = False
+
+try:
+    from livekit.plugins.openai.realtime.realtime_model import (
+        InputAudioTranscription,
+        NoiseReduction,
+        TurnDetection,
+    )
+except ImportError:
+    InputAudioTranscription = None
+    NoiseReduction = None
+    TurnDetection = None
+
 
 from app.core.config import settings
 from app.services.recording_service import recording_path_for_room
@@ -94,7 +111,10 @@ from worker.recordings import (
     should_record_call,
 )
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG, force=True)
+logging.getLogger().setLevel(logging.DEBUG)
+logging.getLogger("livekit").setLevel(logging.DEBUG)
+logging.getLogger("livekit.agents").setLevel(logging.DEBUG)
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 logger = logging.getLogger("vbots.agent")
 
@@ -130,6 +150,13 @@ _TRANSFER_KEYWORDS = (
     "senior se",
     "bade officer",
 )
+
+# OpenAI Realtime only accepts these voice names — NOT Cartesia/ElevenLabs voice
+# ids/UUIDs. If an agent's `voice` field still holds a leftover value from a
+# different TTS provider, silently fall back to "marin" rather than 400ing.
+_REALTIME_VOICES = {
+    "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar",
+}
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -209,13 +236,24 @@ class DynamicVoiceAgent(Agent):
         # Deepgram/Cartesia language for THIS agent (en for a UK/English client, hi otherwise)
         provider_lang = _provider_lang(config)
 
-        deepgram_key = os.getenv("DEEPGRAM_API_KEY", "")
-        if _DEEPGRAM_AVAILABLE and deepgram_key:
-            # nova-2 + language="hi" is the correct code for Hindi/Hinglish on Deepgram.
-            # "hi-Latn" (Romanised Hindi) does NOT exist in Deepgram's API → always 400.
-            # With language="hi" Deepgram transcribes Hindi words in Devanagari and
-            # English words in Latin script; the LLM understands both fine.
-            # sample_rate=8000: MUST stay 8000 — SIP PSTN narrowband.
+        from app.core.crypto import decrypt_secret
+
+        # Explicit per-agent provider selection (UI). None/unset on any of these
+        # falls through to the ORIGINAL priority-chain behaviour below, UNCHANGED —
+        # existing agents (no provider explicitly set) are byte-for-byte unaffected.
+        explicit_stt = (getattr(config, "stt_provider", None) or "").strip().lower()
+        stt_key_override = decrypt_secret(getattr(config, "stt_api_key", None))
+        explicit_llm = (getattr(config, "llm_provider", None) or "").strip().lower()
+        llm_key_override = decrypt_secret(getattr(config, "llm_api_key", None))
+        # OpenAI Realtime (speech-to-speech) replaces STT+LLM+TTS with one model —
+        # it takes the caller's audio directly and speaks back, so the STT/TTS
+        # provider selection below is irrelevant and skipped entirely.
+        use_realtime = explicit_llm == "openai_realtime"
+
+        if use_realtime:
+            stt = None
+            logger.info("STT: skipped — OpenAI Realtime (STS) handles audio directly [explicit]")
+        elif explicit_stt == "deepgram" and _DEEPGRAM_AVAILABLE:
             stt = deepgram_plugin.STT(
                 model="nova-2",
                 language=provider_lang,
@@ -224,9 +262,10 @@ class DynamicVoiceAgent(Agent):
                 sample_rate=8000,
                 endpointing_ms=50,
                 no_delay=True,
+                **({"api_key": stt_key_override} if stt_key_override else {}),
             )
-            logger.info("STT: Deepgram nova-2 (%s, 8kHz, endpointing=50ms)", provider_lang)
-        elif use_sarvam:
+            logger.info("STT: Deepgram nova-2 (%s, 8kHz, endpointing=50ms) [explicit]", provider_lang)
+        elif explicit_stt == "sarvam":
             stt = sarvam.STT(
                 language=lang_code,
                 model=settings.AGENT_STT_MODEL,
@@ -234,11 +273,41 @@ class DynamicVoiceAgent(Agent):
                 high_vad_sensitivity=False,
                 sample_rate=settings.AGENT_AUDIO_SAMPLE_RATE,
                 prompt=settings.AGENT_STT_PROMPT,
+                **({"api_key": stt_key_override} if stt_key_override else {}),
             )
-            logger.info("STT: Sarvam %s (batch)", settings.AGENT_STT_MODEL)
+            logger.info("STT: Sarvam %s (batch) [explicit]", settings.AGENT_STT_MODEL)
         else:
-            stt = openai.STT()
-            logger.info("STT: OpenAI Whisper")
+            # === Original fallback chain (unchanged) ===
+            deepgram_key = os.getenv("DEEPGRAM_API_KEY", "")
+            if _DEEPGRAM_AVAILABLE and deepgram_key:
+                # nova-2 + language="hi" is the correct code for Hindi/Hinglish on Deepgram.
+                # "hi-Latn" (Romanised Hindi) does NOT exist in Deepgram's API → always 400.
+                # With language="hi" Deepgram transcribes Hindi words in Devanagari and
+                # English words in Latin script; the LLM understands both fine.
+                # sample_rate=8000: MUST stay 8000 — SIP PSTN narrowband.
+                stt = deepgram_plugin.STT(
+                    model="nova-2",
+                    language=provider_lang,
+                    smart_format=False,
+                    punctuate=False,
+                    sample_rate=8000,
+                    endpointing_ms=50,
+                    no_delay=True,
+                )
+                logger.info("STT: Deepgram nova-2 (%s, 8kHz, endpointing=50ms)", provider_lang)
+            elif use_sarvam:
+                stt = sarvam.STT(
+                    language=lang_code,
+                    model=settings.AGENT_STT_MODEL,
+                    mode="transcribe",
+                    high_vad_sensitivity=False,
+                    sample_rate=settings.AGENT_AUDIO_SAMPLE_RATE,
+                    prompt=settings.AGENT_STT_PROMPT,
+                )
+                logger.info("STT: Sarvam %s (batch)", settings.AGENT_STT_MODEL)
+            else:
+                stt = openai.STT()
+                logger.info("STT: OpenAI Whisper")
 
         reply_tokens = min(int(config.max_tokens), settings.AGENT_REPLY_MAX_TOKENS)
 
@@ -254,15 +323,21 @@ class DynamicVoiceAgent(Agent):
         gender = (getattr(config, "gender", "female") or "female").lower()
         if gender == "male":
             gender_rule = (
-                "2. GENDER: You are a MALE agent. Always use masculine Hindi verb forms "
-                "about yourself — 'kar sakta hoon', 'karunga', 'bataaunga', 'samajh "
-                "gaya', 'rahunga'. NEVER use feminine forms like 'kar sakti hoon'.\n"
+                "2. GENDER: You are a MALE agent. This ONLY applies when you are "
+                "replying in Hindi or Hinglish — in that case use masculine Hindi verb "
+                "forms about yourself ('kar sakta hoon', 'karunga', 'bataaunga', 'samajh "
+                "gaya', 'rahunga'), never feminine forms. When replying in English, this "
+                "rule does not apply — speak natural English ('I can', 'I will'); do NOT "
+                "insert Hindi words into an English reply just to satisfy this rule.\n"
             )
         else:
             gender_rule = (
-                "2. GENDER: You are a FEMALE agent. Always use feminine Hindi verb forms "
-                "about yourself — 'kar sakti hoon', 'karungi', 'bataaungi', 'samajh "
-                "gayi', 'rahungi'. NEVER use masculine forms like 'kar sakta hoon'.\n"
+                "2. GENDER: You are a FEMALE agent. This ONLY applies when you are "
+                "replying in Hindi or Hinglish — in that case use feminine Hindi verb "
+                "forms about yourself ('kar sakti hoon', 'karungi', 'bataaungi', 'samajh "
+                "gayi', 'rahungi'), never masculine forms. When replying in English, this "
+                "rule does not apply — speak natural English ('I can', 'I will'); do NOT "
+                "insert Hindi words into an English reply just to satisfy this rule.\n"
             )
 
         # Inject per-lead dynamic fields into the prompt body ({customer_name},
@@ -322,76 +397,163 @@ class DynamicVoiceAgent(Agent):
         #   primary = Groq (fast/cheap) — but free tier hits 429 token-rate limits.
         #   fallback = OpenAI — kicks in automatically when Groq errors (429/5xx),
         #   so the bot NEVER goes silent mid-call due to a Groq rate limit.
-        groq_key = os.getenv("GROQ_API_KEY", "")
-        openai_key = os.getenv("OPENAI_API_KEY", "")
-        groq_llm = None
-        openai_llm = None
-        groq_model = settings.GROQ_MODEL
-        if _GROQ_AVAILABLE and groq_key:
-            groq_llm = groq_plugin.LLM(
-                model=groq_model,
-                temperature=float(config.temperature),
-                max_completion_tokens=reply_tokens,
-            )
-        if openai_key:
-            openai_llm = openai.LLM(
-                model=config.model or settings.DEFAULT_LLM_MODEL,
-                temperature=float(config.temperature),
-                max_completion_tokens=reply_tokens,
-            )
-
-        # LLM_PRIMARY chooses which provider runs first:
-        #   "openai" (default) — reliable, good quality, no rate-limit storm. Use this
-        #                        on Groq FREE tier (6000 TPM is too small for calls).
-        #   "groq"   — fast/cheap; only sensible on Groq DEV tier (paid, high limits).
-        # The other provider becomes the automatic fallback.
-        llm_primary = os.getenv("LLM_PRIMARY", "openai").strip().lower()
-        from livekit.agents import llm as _lk_llm
-
-        if groq_llm and openai_llm:
-            if llm_primary == "groq":
-                llm = _lk_llm.FallbackAdapter([groq_llm, openai_llm])
-                logger.info("LLM: Groq (primary) → OpenAI fallback (max_tokens=%d)", reply_tokens)
+        if explicit_llm in ("openai", "groq"):
+            # Explicit provider chosen in the UI: use ONLY that provider, no automatic
+            # fallback to the other (the client picked this one deliberately). Falls
+            # back to the global key for that provider if no per-agent key is set.
+            if explicit_llm == "openai":
+                llm = openai.LLM(
+                    model=config.model or settings.DEFAULT_LLM_MODEL,
+                    temperature=float(config.temperature),
+                    max_completion_tokens=reply_tokens,
+                    **({"api_key": llm_key_override} if llm_key_override else {}),
+                )
+                logger.info(
+                    "LLM: OpenAI %s (max_tokens=%d) [explicit]",
+                    config.model or settings.DEFAULT_LLM_MODEL, reply_tokens,
+                )
             else:
-                llm = _lk_llm.FallbackAdapter([openai_llm, groq_llm])
-                logger.info("LLM: OpenAI (primary) → Groq fallback (max_tokens=%d)", reply_tokens)
-        elif openai_llm:
-            llm = openai_llm
-            logger.info("LLM: OpenAI %s (max_tokens=%d)", config.model or settings.DEFAULT_LLM_MODEL, reply_tokens)
-        elif groq_llm:
-            llm = groq_llm
+                llm = groq_plugin.LLM(
+                    model=config.model or settings.GROQ_MODEL,
+                    temperature=float(config.temperature),
+                    max_completion_tokens=reply_tokens,
+                    **({"api_key": llm_key_override} if llm_key_override else {}),
+                )
+                logger.info(
+                    "LLM: Groq %s (max_tokens=%d) [explicit]",
+                    config.model or settings.GROQ_MODEL, reply_tokens,
+                )
+        elif use_realtime:
+            # Speech-to-speech: one model handles listening + thinking + speaking.
+            # `voice` is repurposed here to hold the Realtime voice name (e.g. "marin",
+            # "alloy", "cedar") instead of a Cartesia/Sarvam voice id — fall back to
+            # "marin" if it still holds a leftover value from a different provider.
+            raw_voice = (config.voice or "").strip().lower()
+            if raw_voice in _REALTIME_VOICES:
+                realtime_voice = raw_voice
+            else:
+                if raw_voice:
+                    logger.warning(
+                        "Voice %r is not a valid OpenAI Realtime voice (valid: %s) — "
+                        "falling back to 'marin'", config.voice, sorted(_REALTIME_VOICES),
+                    )
+                realtime_voice = "marin"
+            realtime_model = (config.model or "").strip() or "gpt-realtime"
+            # Without input_audio_transcription, the caller's speech is never turned
+            # into text — transfer keyword detection, transcript logging, and CRM
+            # data extraction all silently stop working (they all read the
+            # transcribed text, not raw audio, and are independent of what the
+            # model itself understood to generate its spoken reply).
+            # language="en" is a documented accuracy aid — short/quiet utterances
+            # (a lone "yes", a brief ack) were otherwise being hallucinated as
+            # random foreign-script text instead of English.
+            transcription_kwargs = (
+                {
+                    "input_audio_transcription": InputAudioTranscription(
+                        model="gpt-4o-mini-transcribe", language="en",
+                    )
+                }
+                if InputAudioTranscription is not None
+                else {}
+            )
+            # SIP/PSTN phone lines are noisy — without this, static/line noise gets
+            # misread as speech and the model hallucinates unrelated foreign-script
+            # text for it, then reacts to that hallucination as if it were real.
+            # near_field suits a handset held to the ear (vs far_field for a room
+            # mic); raising the VAD threshold above the 0.5 default requires louder,
+            # clearer audio before a turn is triggered at all.
+            noise_kwargs = (
+                {"input_audio_noise_reduction": NoiseReduction(type="near_field")}
+                if NoiseReduction is not None
+                else {}
+            )
+            turn_detection_kwargs = (
+                {"turn_detection": TurnDetection(type="server_vad", threshold=0.6)}
+                if TurnDetection is not None
+                else {}
+            )
+            llm = openai.realtime.RealtimeModel(
+                model=realtime_model,
+                voice=realtime_voice,
+                **transcription_kwargs,
+                **noise_kwargs,
+                **turn_detection_kwargs,
+                **({"api_key": llm_key_override} if llm_key_override else {}),
+            )
             logger.info(
-                "LLM: Groq %s (max_tokens=%d) — NO OpenAI fallback "
-                "(set OPENAI_API_KEY to avoid silence on 429)",
-                groq_model,
-                reply_tokens,
+                "LLM: OpenAI Realtime (STS) model=%s voice=%s [explicit]",
+                realtime_model, realtime_voice,
             )
         else:
-            raise RuntimeError("No LLM configured: set GROQ_API_KEY and/or OPENAI_API_KEY")
+            # === Original fallback chain (unchanged) ===
+            groq_key = os.getenv("GROQ_API_KEY", "")
+            openai_key = os.getenv("OPENAI_API_KEY", "")
+            groq_llm = None
+            openai_llm = None
+            groq_model = settings.GROQ_MODEL
+            if _GROQ_AVAILABLE and groq_key:
+                groq_llm = groq_plugin.LLM(
+                    model=groq_model,
+                    temperature=float(config.temperature),
+                    max_completion_tokens=reply_tokens,
+                )
+            if openai_key:
+                openai_llm = openai.LLM(
+                    model=config.model or settings.DEFAULT_LLM_MODEL,
+                    temperature=float(config.temperature),
+                    max_completion_tokens=reply_tokens,
+                )
 
-        cartesia_key = os.getenv("CARTESIA_API_KEY", "")
-        # Per-agent voice + language → each client can have its own tone (e.g. a
-        # British-English voice for the UK client). Set the agent's `voice` field to a
-        # Cartesia voice UUID and its `language` to English/Hindi/Hinglish in the UI.
+            # LLM_PRIMARY chooses which provider runs first:
+            #   "openai" (default) — reliable, good quality, no rate-limit storm. Use this
+            #                        on Groq FREE tier (6000 TPM is too small for calls).
+            #   "groq"   — fast/cheap; only sensible on Groq DEV tier (paid, high limits).
+            # The other provider becomes the automatic fallback.
+            llm_primary = os.getenv("LLM_PRIMARY", "openai").strip().lower()
+            from livekit.agents import llm as _lk_llm
+
+            if groq_llm and openai_llm:
+                if llm_primary == "groq":
+                    llm = _lk_llm.FallbackAdapter([groq_llm, openai_llm])
+                    logger.info("LLM: Groq (primary) → OpenAI fallback (max_tokens=%d)", reply_tokens)
+                else:
+                    llm = _lk_llm.FallbackAdapter([openai_llm, groq_llm])
+                    logger.info("LLM: OpenAI (primary) → Groq fallback (max_tokens=%d)", reply_tokens)
+            elif openai_llm:
+                llm = openai_llm
+                logger.info("LLM: OpenAI %s (max_tokens=%d)", config.model or settings.DEFAULT_LLM_MODEL, reply_tokens)
+            elif groq_llm:
+                llm = groq_llm
+                logger.info(
+                    "LLM: Groq %s (max_tokens=%d) — NO OpenAI fallback "
+                    "(set OPENAI_API_KEY to avoid silence on 429)",
+                    groq_model,
+                    reply_tokens,
+                )
+            else:
+                raise RuntimeError("No LLM configured: set GROQ_API_KEY and/or OPENAI_API_KEY")
+
+        explicit_tts = (getattr(config, "tts_provider", None) or "").strip().lower()
+        tts_key_override = decrypt_secret(getattr(config, "tts_api_key", None))
         cartesia_voice = _cartesia_voice_for(config)
-        if _CARTESIA_AVAILABLE and cartesia_key and cartesia_voice:
-            # Cartesia sonic-3.5: ~50-100ms TTFB. Supports en (UK/US) and hi.
-            # Pick voices at cartesia.ai/voices; put the UUID in the agent's `voice` field.
+
+        if use_realtime:
+            tts = None
+            logger.info("TTS: skipped — OpenAI Realtime (STS) handles audio directly [explicit]")
+        elif explicit_tts == "cartesia" and _CARTESIA_AVAILABLE:
             tts = cartesia_plugin.TTS(
                 model="sonic-3.5",
                 voice=cartesia_voice,
                 language=provider_lang,
                 sample_rate=settings.AGENT_AUDIO_SAMPLE_RATE,
+                **({"api_key": tts_key_override} if tts_key_override else {}),
             )
-            logger.info("TTS: Cartesia sonic-3.5 voice=%s (%s)", cartesia_voice, provider_lang)
-        elif use_sarvam:
+            logger.info("TTS: Cartesia sonic-3.5 voice=%s (%s) [explicit]", cartesia_voice, provider_lang)
+        elif explicit_tts == "sarvam":
             tts = sarvam.TTS(
                 model=settings.AGENT_TTS_MODEL,
-                speaker=voice_to_sarvam_speaker(
-                    config.voice, tts_model=settings.AGENT_TTS_MODEL
-                ),
+                speaker=voice_to_sarvam_speaker(config.voice, tts_model=settings.AGENT_TTS_MODEL),
                 target_language_code=lang_code,
-                # Generate at TTS native rate (22050 Hz); LiveKit resamples to 8 kHz for SIP.
                 speech_sample_rate=settings.AGENT_TTS_SAMPLE_RATE,
                 enable_preprocessing=True,
                 pace=1.05,
@@ -399,18 +561,79 @@ class DynamicVoiceAgent(Agent):
                 pitch=0.04,
                 loudness=1.02,
                 max_chunk_length=120,
+                **({"api_key": tts_key_override} if tts_key_override else {}),
             )
-            logger.info("TTS: Sarvam %s (fallback)", settings.AGENT_TTS_MODEL)
+            logger.info("TTS: Sarvam %s (explicit)", settings.AGENT_TTS_MODEL)
+        elif explicit_tts == "elevenlabs" and _ELEVENLABS_AVAILABLE:
+            # New provider, no legacy fallback equivalent — voice field holds the
+            # ElevenLabs voice_id (from elevenlabs.io/app/voice-library).
+            tts = elevenlabs_plugin.TTS(
+                voice_id=(config.voice or "").strip() or None,
+                **({"api_key": tts_key_override} if tts_key_override else {}),
+            )
+            logger.info("TTS: ElevenLabs voice_id=%s [explicit]", config.voice)
         else:
-            tts = openai.TTS()
-            logger.info("TTS: OpenAI (fallback)")
+            # === Original fallback chain (unchanged) ===
+            cartesia_key = os.getenv("CARTESIA_API_KEY", "")
+            # Per-agent voice + language → each client can have its own tone (e.g. a
+            # British-English voice for the UK client). Set the agent's `voice` field to a
+            # Cartesia voice UUID and its `language` to English/Hindi/Hinglish in the UI.
+            if _CARTESIA_AVAILABLE and cartesia_key and cartesia_voice:
+                # Cartesia sonic-3.5: ~50-100ms TTFB. Supports en (UK/US) and hi.
+                # Pick voices at cartesia.ai/voices; put the UUID in the agent's `voice` field.
+                tts = cartesia_plugin.TTS(
+                    model="sonic-3.5",
+                    voice=cartesia_voice,
+                    language=provider_lang,
+                    sample_rate=settings.AGENT_AUDIO_SAMPLE_RATE,
+                )
+                logger.info("TTS: Cartesia sonic-3.5 voice=%s (%s)", cartesia_voice, provider_lang)
+            elif use_sarvam:
+                tts = sarvam.TTS(
+                    model=settings.AGENT_TTS_MODEL,
+                    speaker=voice_to_sarvam_speaker(
+                        config.voice, tts_model=settings.AGENT_TTS_MODEL
+                    ),
+                    target_language_code=lang_code,
+                    # Generate at TTS native rate (22050 Hz); LiveKit resamples to 8 kHz for SIP.
+                    speech_sample_rate=settings.AGENT_TTS_SAMPLE_RATE,
+                    enable_preprocessing=True,
+                    pace=1.05,
+                    temperature=0.45,
+                    pitch=0.04,
+                    loudness=1.02,
+                    max_chunk_length=120,
+                )
+                logger.info("TTS: Sarvam %s (fallback)", settings.AGENT_TTS_MODEL)
+            else:
+                tts = openai.TTS()
+                logger.info("TTS: OpenAI (fallback)")
 
         super().__init__(instructions=phone_prompt, stt=stt, llm=llm, tts=tts)
         self._greeting = greeting
         self._interruptions = config.interruptions_enabled
+        self._is_realtime = use_realtime
 
     async def on_enter(self):
-        await self.session.say(self._greeting)
+        logger.info("on_enter: called, is_realtime=%s", self._is_realtime)
+        if self._is_realtime:
+            # OpenAI's Realtime model has no TTS to .say() a fixed line with — ask
+            # it to open the call by speaking this line itself instead.
+            logger.info("on_enter: calling generate_reply for realtime greeting")
+            try:
+                await self.session.generate_reply(
+                    instructions=(
+                        f"Start the call now by greeting the caller with this exact line, "
+                        f"word for word: {self._greeting!r}"
+                    )
+                )
+                logger.info("on_enter: generate_reply returned successfully")
+            except Exception:
+                logger.exception("on_enter: generate_reply raised an exception")
+                raise
+        else:
+            await self.session.say(self._greeting)
+        logger.info("on_enter: finished")
 
     async def _perform_transfer(self) -> bool:
         """Execute the SIP REFER transfer. Returns True on success."""
