@@ -278,6 +278,7 @@ async def extract_and_store_call_data(call_id: int) -> None:
 
         data = await ai_service.extract_call_data(transcript, fields)
         if data:
+            logger.info("Raw extracted data (before caller-ID override) call_id=%s: %s", call_id, data)
             _overwrite_phone_fields_with_caller_id(data, fields, call)
             call.collected_data = _json.dumps(data, ensure_ascii=False)
             await db.commit()
