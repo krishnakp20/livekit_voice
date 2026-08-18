@@ -185,8 +185,46 @@ _OPT_OUT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Agents consistently read a captured number back as space-separated single digits
+# ("your number is 7 2 9 0 0 9 3 9 0 3, correct?") right before asking for confirmation.
+# That's a far more reliable signal than asking an LLM to reconstruct a phone number
+# from the customer's own scattered, often-wrong multi-turn attempts.
+_TEN_DIGIT_READBACK_RE = re.compile(
+    r"\b(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\b"
+)
+_CONFIRM_WORD_RE = re.compile(
+    r"\b(?:yes|yeah|yep|yup|haan|ji|sahi|correct|right|theek|thik)\b", re.IGNORECASE
+)
 
-def _overwrite_phone_fields_with_caller_id(data: dict, fields: list, call) -> None:
+
+def _find_confirmed_phone_in_transcript(transcript: str) -> str | None:
+    """Scan the transcript directly for a 10-digit number the agent read back that the
+    customer then explicitly confirmed, instead of relying on an LLM to piece one
+    together from noisy, multi-attempt spoken digits. Returns the LAST such confirmed
+    number (the final, agreed-upon one after any earlier failed attempts), or None if
+    no clean agent-readback-plus-confirmation exchange is found."""
+    lines = transcript.splitlines()
+    found = None
+    for i, line in enumerate(lines):
+        if not line.lower().startswith("agent:"):
+            continue
+        match = None
+        for m in _TEN_DIGIT_READBACK_RE.finditer(line):
+            match = m  # last match on this line wins
+        if not match:
+            continue
+        # Only the customer's OWN reply counts as confirmation — checking the agent's
+        # question line itself is unreliable, since it's often phrased "...correct?"
+        # regardless of whether the number just read back was actually right.
+        reply_window = " ".join(lines[i + 1 : i + 3])
+        if _CONFIRM_WORD_RE.search(reply_window):
+            found = "".join(match.groups())
+    return found
+
+
+def _overwrite_phone_fields_with_caller_id(
+    data: dict, fields: list, call, transcript: str = ""
+) -> None:
     """Replace any phone-like extracted field with the actual SIP caller/callee number,
     unless the field's own description explicitly says not to (_OPT_OUT_RE) — in which
     case the LLM's transcript-extracted value is trusted instead. When the caller-ID
@@ -214,12 +252,14 @@ def _overwrite_phone_fields_with_caller_id(data: dict, fields: list, call) -> No
             continue
         description = f.get("description") or ""
         if _OPT_OUT_RE.search(description):
-            # Field explicitly wants the customer-stated number — trust the LLM extraction,
-            # but fall back to the verified caller ID rather than leaving it blank if the
-            # spoken digits never resolved to a clean number (e.g. the conversation got
-            # confused and the LLM correctly refused to guess).
-            if not data.get(key):
-                data[key] = real_phone
+            # Field explicitly wants the customer-stated number. Priority order:
+            # 1. A number the agent read back AND the customer explicitly confirmed
+            #    (found directly in the transcript — most reliable).
+            # 2. Whatever the LLM extraction returned.
+            # 3. The verified caller ID, rather than leaving the field blank, if
+            #    neither of the above resolved to a clean number.
+            confirmed = _find_confirmed_phone_in_transcript(transcript)
+            data[key] = confirmed or data.get(key) or real_phone
             continue
         stated = data.get(key)
         if stated and "customer_stated_phone_no" not in data:
@@ -279,7 +319,7 @@ async def extract_and_store_call_data(call_id: int) -> None:
         data = await ai_service.extract_call_data(transcript, fields)
         if data:
             logger.info("Raw extracted data (before caller-ID override) call_id=%s: %s", call_id, data)
-            _overwrite_phone_fields_with_caller_id(data, fields, call)
+            _overwrite_phone_fields_with_caller_id(data, fields, call, transcript)
             call.collected_data = _json.dumps(data, ensure_ascii=False)
             await db.commit()
             logger.info("Collected data call_id=%s: %s", call_id, data)
