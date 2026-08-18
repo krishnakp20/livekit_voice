@@ -180,13 +180,16 @@ _PHONE_KEY_RE = re.compile(r"phone|mobile|contact.*no|calling.*no", re.IGNORECAS
 
 
 def _overwrite_phone_fields_with_caller_id(data: dict, fields: list, call) -> None:
-    """Replace any phone-like extracted field with the actual SIP caller/callee number.
+    """Replace any phone-like extracted field with the actual SIP caller/callee number,
+    while preserving whatever number the customer verbally stated under a separate key.
 
     The LLM extracts phone numbers by parsing spoken digits from the transcript
-    ("double nine double one...") which is unreliable and pointless — the real
-    number is already known from the SIP call itself. Whichever field name the
-    client's CRM uses (Calling Phone no., Contact Number, Mobile, ...), if its
-    normalised key looks like a phone field, overwrite it with the true number."""
+    ("double nine double one...") which is unreliable — the real number is already
+    known from the SIP call itself. Whichever field name the client's CRM uses
+    (Calling Phone no., Contact Number, Mobile, ...), if its normalised key looks
+    like a phone field, overwrite it with the true number. The customer-stated
+    value is kept separately (customer_stated_phone_no) in case they genuinely
+    gave a different callback number rather than a misheard version of their own."""
     raw = call.caller_number if call.direction.value == "inbound" else call.callee_number
     if not raw:
         return
@@ -199,6 +202,9 @@ def _overwrite_phone_fields_with_caller_id(data: dict, fields: list, call) -> No
     for f in fields:
         key = f.get("key")
         if key and _PHONE_KEY_RE.search(key):
+            stated = data.get(key)
+            if stated and "customer_stated_phone_no" not in data:
+                data["customer_stated_phone_no"] = stated
             data[key] = real_phone
 
 
