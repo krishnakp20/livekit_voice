@@ -1,5 +1,6 @@
 """OpenAI and Sarvam AI provider integration."""
 
+import re
 import time
 from typing import AsyncGenerator, Optional
 
@@ -8,6 +9,15 @@ from openai import AsyncOpenAI
 
 from app.core.config import settings
 from app.db.models.ai_agent import AIAgent, AIProvider
+
+# Matches a whole sentence telling the caller-ID override not to use the
+# incoming/calling number for a field (mirrors call_tracking._OPT_OUT_RE) — stripped
+# out of field descriptions before they reach the extraction prompt (see
+# AIService.extract_call_data), since it's an instruction for our code, not the model.
+_OPT_OUT_SENTENCE_RE = re.compile(
+    r"(?:(?<=[.!?])\s*|^)[^.!?]*\bdo\s+not\s+(?:capture|use)\b[^.!?]*(?:incoming|calling)[^.!?]*number[^.!?]*[.!?]",
+    re.IGNORECASE,
+)
 
 
 class AIService:
@@ -154,8 +164,17 @@ class AIService:
         if not (transcript or "").strip() or not fields:
             return {}
 
+        # A field description may tell our own caller-ID-override logic (see
+        # call_tracking._OPT_OUT_RE) not to use the incoming/calling number for that
+        # field. That sentence is meant for our code, not this extraction prompt — the
+        # model tends to misread it as "skip any phone number", including ones the
+        # customer actually speaks and confirms. Strip it before it reaches the model.
+        def _prompt_description(f: dict) -> str:
+            desc = f.get("description", f.get("key", ""))
+            return _OPT_OUT_SENTENCE_RE.sub("", desc).strip()
+
         field_lines = "\n".join(
-            f"- {f.get('key')}: {f.get('description', f.get('key'))}" for f in fields if f.get("key")
+            f"- {f.get('key')}: {_prompt_description(f)}" for f in fields if f.get("key")
         )
         keys = [f["key"] for f in fields if f.get("key")]
         system = (
