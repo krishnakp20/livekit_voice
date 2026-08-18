@@ -214,7 +214,12 @@ def _overwrite_phone_fields_with_caller_id(data: dict, fields: list, call) -> No
             continue
         description = f.get("description") or ""
         if _OPT_OUT_RE.search(description):
-            # Field explicitly wants the customer-stated number — trust the LLM extraction.
+            # Field explicitly wants the customer-stated number — trust the LLM extraction,
+            # but fall back to the verified caller ID rather than leaving it blank if the
+            # spoken digits never resolved to a clean number (e.g. the conversation got
+            # confused and the LLM correctly refused to guess).
+            if not data.get(key):
+                data[key] = real_phone
             continue
         stated = data.get(key)
         if stated and "customer_stated_phone_no" not in data:
