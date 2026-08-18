@@ -185,16 +185,57 @@ _OPT_OUT_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Agents consistently read a captured number back as space-separated single digits
-# ("your number is 7 2 9 0 0 9 3 9 0 3, correct?") right before asking for confirmation.
-# That's a far more reliable signal than asking an LLM to reconstruct a phone number
-# from the customer's own scattered, often-wrong multi-turn attempts.
+# Agents read a captured number back either as space-separated single digits
+# ("your number is 7 2 9 0 0 9 3 9 0 3, correct?") or spelled out as words ("seven
+# two nine zero zero nine three nine zero three, correct?") — inconsistently, call to
+# call. That's a far more reliable signal than asking an LLM to reconstruct a phone
+# number from the customer's own scattered, often-wrong multi-turn attempts.
 _TEN_DIGIT_READBACK_RE = re.compile(
     r"\b(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\s+(\d)\b"
 )
+_DIGIT_WORD_MAP = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+}
+_MULTIPLIER_WORD_MAP = {"double": 2, "triple": 3}
+# Confirmation replies come back in Latin script (yes/haan/ji) or Devanagari (हां/जी) —
+# both need to be recognised.
 _CONFIRM_WORD_RE = re.compile(
-    r"\b(?:yes|yeah|yep|yup|haan|ji|sahi|correct|right|theek|thik)\b", re.IGNORECASE
+    r"\b(?:yes|yeah|yep|yup|haan|ji|sahi|correct|right|theek|thik)\b"
+    r"|हां|हाँ|जी|सही|ठीक|बिल्कुल",
+    re.IGNORECASE,
 )
+
+
+def _longest_digit_word_run(line: str) -> str | None:
+    """Find the longest run of CONSECUTIVE spoken digit-words in a line (handling
+    'double nine' -> '99', 'triple six' -> '666') and return it if it's exactly 10
+    digits. Requiring a tight consecutive run — not digit-words scattered anywhere in
+    the sentence — avoids false positives from stray words like 'one' in 'provide one
+    more digit'."""
+    tokens = re.findall(r"[a-zA-Z]+", line.lower())
+    best = ""
+    current: list[str] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in _MULTIPLIER_WORD_MAP and i + 1 < len(tokens) and tokens[i + 1] in _DIGIT_WORD_MAP:
+            current.append(_DIGIT_WORD_MAP[tokens[i + 1]] * _MULTIPLIER_WORD_MAP[tok])
+            i += 2
+            continue
+        if tok in _DIGIT_WORD_MAP:
+            current.append(_DIGIT_WORD_MAP[tok])
+            i += 1
+            continue
+        run = "".join(current)
+        if len(run) > len(best):
+            best = run
+        current = []
+        i += 1
+    run = "".join(current)
+    if len(run) > len(best):
+        best = run
+    return best if len(best) == 10 else None
 
 
 def _find_confirmed_phone_in_transcript(transcript: str) -> str | None:
@@ -208,17 +249,19 @@ def _find_confirmed_phone_in_transcript(transcript: str) -> str | None:
     for i, line in enumerate(lines):
         if not line.lower().startswith("agent:"):
             continue
-        match = None
+        candidate = None
         for m in _TEN_DIGIT_READBACK_RE.finditer(line):
-            match = m  # last match on this line wins
-        if not match:
+            candidate = "".join(m.groups())  # last numeral match on this line wins
+        if not candidate:
+            candidate = _longest_digit_word_run(line)
+        if not candidate:
             continue
         # Only the customer's OWN reply counts as confirmation — checking the agent's
         # question line itself is unreliable, since it's often phrased "...correct?"
         # regardless of whether the number just read back was actually right.
         reply_window = " ".join(lines[i + 1 : i + 3])
         if _CONFIRM_WORD_RE.search(reply_window):
-            found = "".join(match.groups())
+            found = candidate
     return found
 
 
