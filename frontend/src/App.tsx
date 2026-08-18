@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { Layout } from "@/components/layout/Layout";
 import Login from "@/pages/Login";
 import ResetPassword from "@/pages/ResetPassword";
+import Dashboardold from "@/pages/Dashboard_old";
 import Dashboard from "@/pages/Dashboard";
 import Agents from "@/pages/Agents";
 import SipTrunks from "@/pages/SipTrunks";
@@ -53,6 +54,7 @@ export default function App() {
             }
           >
             <Route index element={<Dashboard />} />
+            <Route path="dashboard_old" element={<Dashboardold />} />
             <Route path="clients" element={<Clients />} />
             <Route path="agents" element={<Agents />} />
             <Route path="sip-trunks" element={<SipTrunks />} />
@@ -72,6 +74,6 @@ export default function App() {
           </Route>
         </Routes>
       </BrowserRouter>
-    </AuthProvider>
+    </AuthProvider> 
   );
 }
