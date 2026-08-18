@@ -177,19 +177,28 @@ async def _update_call_sentiment(call_id: int, client_id: int, caller_lines: lis
 
 
 _PHONE_KEY_RE = re.compile(r"phone|mobile|contact.*no|calling.*no", re.IGNORECASE)
+# Lets a field's own description opt out of the caller-ID override — e.g. an agent
+# explicitly configured to capture the number the customer states on the call,
+# not the number they dialed in from.
+_OPT_OUT_RE = re.compile(
+    r"do\s+not\s+(?:capture|use).{0,60}(?:incoming|calling).{0,20}number",
+    re.IGNORECASE,
+)
 
 
 def _overwrite_phone_fields_with_caller_id(data: dict, fields: list, call) -> None:
     """Replace any phone-like extracted field with the actual SIP caller/callee number,
-    while preserving whatever number the customer verbally stated under a separate key.
+    unless the field's own description explicitly says not to (_OPT_OUT_RE) — in which
+    case the LLM's transcript-extracted value is trusted instead. When the caller-ID
+    value IS used, whatever the customer verbally stated is preserved separately under
+    customer_stated_phone_no, in case it was a genuinely different callback number
+    rather than a misheard version of their own.
 
     The LLM extracts phone numbers by parsing spoken digits from the transcript
     ("double nine double one...") which is unreliable — the real number is already
     known from the SIP call itself. Whichever field name the client's CRM uses
     (Calling Phone no., Contact Number, Mobile, ...), if its normalised key looks
-    like a phone field, overwrite it with the true number. The customer-stated
-    value is kept separately (customer_stated_phone_no) in case they genuinely
-    gave a different callback number rather than a misheard version of their own."""
+    like a phone field, overwrite it with the true number by default."""
     raw = call.caller_number if call.direction.value == "inbound" else call.callee_number
     if not raw:
         return
@@ -201,11 +210,16 @@ def _overwrite_phone_fields_with_caller_id(data: dict, fields: list, call) -> No
 
     for f in fields:
         key = f.get("key")
-        if key and _PHONE_KEY_RE.search(key):
-            stated = data.get(key)
-            if stated and "customer_stated_phone_no" not in data:
-                data["customer_stated_phone_no"] = stated
-            data[key] = real_phone
+        if not key or not _PHONE_KEY_RE.search(key):
+            continue
+        description = f.get("description") or ""
+        if _OPT_OUT_RE.search(description):
+            # Field explicitly wants the customer-stated number — trust the LLM extraction.
+            continue
+        stated = data.get(key)
+        if stated and "customer_stated_phone_no" not in data:
+            data["customer_stated_phone_no"] = stated
+        data[key] = real_phone
 
 
 async def extract_and_store_call_data(call_id: int) -> None:
