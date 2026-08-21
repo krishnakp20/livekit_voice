@@ -142,6 +142,9 @@ class Settings(BaseSettings):
     AGENT_TURN_DETECTION: str = "stt"
     AGENT_MIN_ENDPOINTING_DELAY: float = 0.10
     AGENT_MAX_ENDPOINTING_DELAY: float = 1.50
+    # If the customer goes silent (no finalized speech) for this many seconds, the
+    # call is auto-disconnected. 0 disables the watchdog entirely.
+    AGENT_SILENCE_TIMEOUT_SECONDS: float = 0
     # Cartesia TTS voice ID — pick a Hindi/multilingual voice from cartesia.ai/voices
     # Leave empty to fall back to Sarvam TTS
     CARTESIA_VOICE_ID: str = ""

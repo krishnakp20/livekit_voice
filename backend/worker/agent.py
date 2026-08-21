@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 # backend/ on PYTHONPATH
@@ -917,6 +918,53 @@ async def finalize_call_log(
         logger.warning("Could not finalize call_log for %s: %s", room_name, e)
 
 
+async def _hang_up_room(room_name: str) -> None:
+    """Force-end the call by deleting the room — disconnects the agent AND the SIP
+    participant, which is what actually ends the underlying phone call (just
+    disconnecting the agent's own participant would leave the caller connected)."""
+    from livekit import api
+
+    http_url = settings.LIVEKIT_URL.replace("wss://", "https://").replace("ws://", "http://")
+    lkapi = api.LiveKitAPI(url=http_url, api_key=settings.LIVEKIT_API_KEY, api_secret=settings.LIVEKIT_API_SECRET)
+    try:
+        await lkapi.room.delete_room(api.DeleteRoomRequest(room=room_name))
+    finally:
+        await lkapi.aclose()
+
+
+def _start_silence_watchdog(session: AgentSession, room_name: str, timeout_seconds: float) -> asyncio.Task:
+    """Auto-disconnect the call if the customer goes silent (no finalized speech) for
+    `timeout_seconds`. Only resets on the CUSTOMER speaking — the agent's own replies
+    don't count, since this is specifically about a customer who's gone quiet/dropped
+    off audio, not normal turn-taking pauses."""
+    last_activity = {"t": time.monotonic()}
+
+    @session.on("user_input_transcribed")
+    def _on_user_speech(ev) -> None:
+        if getattr(ev, "is_final", False):
+            last_activity["t"] = time.monotonic()
+
+    async def _watch() -> None:
+        try:
+            while True:
+                await asyncio.sleep(5)
+                idle_for = time.monotonic() - last_activity["t"]
+                if idle_for >= timeout_seconds:
+                    logger.info(
+                        "Silence watchdog: no customer speech for %.0fs, ending call room=%s",
+                        idle_for, room_name,
+                    )
+                    try:
+                        await _hang_up_room(room_name)
+                    except Exception:
+                        logger.exception("Silence watchdog: failed to end call room=%s", room_name)
+                    return
+        except asyncio.CancelledError:
+            pass
+
+    return asyncio.create_task(_watch())
+
+
 async def entrypoint(ctx: JobContext):
     room_name = ctx.room.name
     logger.info(
@@ -1135,6 +1183,17 @@ async def entrypoint(ctx: JobContext):
 
     if call_id:
         attach_call_listeners(session, call_id, config.client_id)
+
+    silence_watchdog_task = None
+    if settings.AGENT_SILENCE_TIMEOUT_SECONDS and settings.AGENT_SILENCE_TIMEOUT_SECONDS > 0:
+        silence_watchdog_task = _start_silence_watchdog(
+            session, ctx.room.name, settings.AGENT_SILENCE_TIMEOUT_SECONDS
+        )
+
+        @session.on("close")
+        def _cancel_silence_watchdog(_ev) -> None:
+            if silence_watchdog_task and not silence_watchdog_task.done():
+                silence_watchdog_task.cancel()
 
     # Build personalised greeting. Substitute {tokens} from the lead's fields first;
     # if the greeting has NO tokens but we know the lead's name, prepend a friendly
