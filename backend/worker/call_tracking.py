@@ -453,7 +453,6 @@ def attach_call_listeners(session: AgentSession, call_id: int, client_id: int) -
     """Wire AgentSession events → MySQL transcripts + per-turn latency breakdown."""
     turn_no = {"n": 0}
     bucket: dict[str, _TurnBucket | None] = {"current": None}
-    caller_lines: list[str] = []
     usage = _USAGE.setdefault(call_id, _CallUsage())
 
     def _new_turn(user_text: str = "") -> _TurnBucket:
@@ -538,8 +537,12 @@ def attach_call_listeners(session: AgentSession, call_id: int, client_id: int) -
             user_bucket = bucket["current"]
 
             async def _save_user_turn() -> None:
-                caller_lines.append(content)
-                await _update_call_sentiment(call_id, client_id, caller_lines)
+                # Sentiment is scored once at call end (refresh_call_sentiment_from_db,
+                # called from agent.py on hangup) — not per turn. Per-turn scoring here
+                # was re-sending the whole growing transcript to OpenAI on every user
+                # turn (real, avoidable request volume on the same account/minute the
+                # main chat + STT calls are competing for), and its own final call
+                # duplicated the exact same request the end-of-call refresh makes.
                 # Read transcription_s at save time (not capture time) — the EOU
                 # metrics event that populates it can land slightly after this handler
                 # runs. Deepgram runs in streaming mode, so STTMetrics.duration (and
