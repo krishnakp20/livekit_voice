@@ -498,12 +498,18 @@ class DynamicVoiceAgent(Agent):
                     temperature=float(config.temperature),
                     max_completion_tokens=reply_tokens,
                 )
+                groq_llm.prewarm()
             if openai_key:
                 openai_llm = openai.LLM(
                     model=config.model or settings.DEFAULT_LLM_MODEL,
                     temperature=float(config.temperature),
                     max_completion_tokens=reply_tokens,
                 )
+                # AgentSession's automatic prewarm() call no-ops once these are
+                # wrapped in FallbackAdapter below (it doesn't forward to children),
+                # so the TLS/DNS warm-up never reached OpenAI/Groq without this —
+                # every call's first turn paid full connection setup on top of TTFT.
+                openai_llm.prewarm()
 
             # LLM_PRIMARY chooses which provider runs first:
             #   "openai" (default) — reliable, good quality, no rate-limit storm. Use this
