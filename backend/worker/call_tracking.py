@@ -540,11 +540,15 @@ def attach_call_listeners(session: AgentSession, call_id: int, client_id: int) -
             async def _save_user_turn() -> None:
                 caller_lines.append(content)
                 await _update_call_sentiment(call_id, client_id, caller_lines)
-                # Read stt_api_s at save time (not capture time) — the STT metrics
-                # event that populates it can land slightly after this handler runs.
+                # Read transcription_s at save time (not capture time) — the EOU
+                # metrics event that populates it can land slightly after this handler
+                # runs. Deepgram runs in streaming mode, so STTMetrics.duration (and
+                # therefore stt_api_s) is always 0 per the LiveKit SDK's own contract
+                # ("0.0 if the STT is streaming") — EOUMetrics.transcription_delay is
+                # the real per-turn "time to get transcript after speech ended" value.
                 stt_ms = (
-                    int(user_bucket.stt_api_s * 1000)
-                    if user_bucket and user_bucket.stt_api_s
+                    int(user_bucket.transcription_s * 1000)
+                    if user_bucket and user_bucket.transcription_s
                     else None
                 )
                 await _save_transcript(
