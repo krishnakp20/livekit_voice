@@ -60,11 +60,6 @@ except ImportError:
             """Fallback if the SDK doesn't expose StopResponse."""
 
 from livekit.plugins import openai, sarvam, silero
-try:
-    from livekit.plugins import groq as groq_plugin
-    _GROQ_AVAILABLE = True
-except ImportError:
-    _GROQ_AVAILABLE = False
 
 try:
     from livekit.plugins import deepgram as deepgram_plugin
@@ -391,39 +386,28 @@ class DynamicVoiceAgent(Agent):
         )
 
         # NOTE: Transfer is handled deterministically in on_user_turn_completed via
-        # keyword detection — NOT via an LLM tool call. Groq's 8b model emits tool
-        # calls as plain text (<function=...>), which leaks into TTS and never fires.
+        # keyword detection — NOT via an LLM tool call — so it fires reliably
+        # regardless of how a given model chooses to emit tool calls.
         # So we intentionally do NOT instruct the LLM to transfer here.
-        # LLM selection with automatic fallback:
-        #   primary = Groq (fast/cheap) — but free tier hits 429 token-rate limits.
-        #   fallback = OpenAI — kicks in automatically when Groq errors (429/5xx),
-        #   so the bot NEVER goes silent mid-call due to a Groq rate limit.
-        if explicit_llm in ("openai", "groq"):
-            # Explicit provider chosen in the UI: use ONLY that provider, no automatic
-            # fallback to the other (the client picked this one deliberately). Falls
-            # back to the global key for that provider if no per-agent key is set.
-            if explicit_llm == "openai":
-                llm = openai.LLM(
-                    model=config.model or settings.DEFAULT_LLM_MODEL,
-                    temperature=float(config.temperature),
-                    max_completion_tokens=reply_tokens,
-                    **({"api_key": llm_key_override} if llm_key_override else {}),
-                )
-                logger.info(
-                    "LLM: OpenAI %s (max_tokens=%d) [explicit]",
-                    config.model or settings.DEFAULT_LLM_MODEL, reply_tokens,
-                )
-            else:
-                llm = groq_plugin.LLM(
-                    model=config.model or settings.GROQ_MODEL,
-                    temperature=float(config.temperature),
-                    max_completion_tokens=reply_tokens,
-                    **({"api_key": llm_key_override} if llm_key_override else {}),
-                )
-                logger.info(
-                    "LLM: Groq %s (max_tokens=%d) [explicit]",
-                    config.model or settings.GROQ_MODEL, reply_tokens,
-                )
+        if explicit_llm == "groq":
+            logger.warning(
+                "Agent %s has llm_provider='groq' but Groq is no longer supported — "
+                "using OpenAI instead", getattr(config, "id", "?"),
+            )
+            explicit_llm = "openai"
+        if explicit_llm == "openai":
+            # Explicit provider chosen in the UI: falls back to the global key if no
+            # per-agent key is set.
+            llm = openai.LLM(
+                model=config.model or settings.DEFAULT_LLM_MODEL,
+                temperature=float(config.temperature),
+                max_completion_tokens=reply_tokens,
+                **({"api_key": llm_key_override} if llm_key_override else {}),
+            )
+            logger.info(
+                "LLM: OpenAI %s (max_tokens=%d) [explicit]",
+                config.model or settings.DEFAULT_LLM_MODEL, reply_tokens,
+            )
         elif use_realtime:
             # Speech-to-speech: one model handles listening + thinking + speaking.
             # `voice` is repurposed here to hold the Realtime voice name (e.g. "marin",
@@ -486,59 +470,19 @@ class DynamicVoiceAgent(Agent):
                 realtime_model, realtime_voice,
             )
         else:
-            # === Original fallback chain (unchanged) ===
-            groq_key = os.getenv("GROQ_API_KEY", "")
             openai_key = os.getenv("OPENAI_API_KEY", "")
-            groq_llm = None
-            openai_llm = None
-            groq_model = settings.GROQ_MODEL
-            if _GROQ_AVAILABLE and groq_key:
-                groq_llm = groq_plugin.LLM(
-                    model=groq_model,
-                    temperature=float(config.temperature),
-                    max_completion_tokens=reply_tokens,
-                )
-                groq_llm.prewarm()
-            if openai_key:
-                openai_llm = openai.LLM(
-                    model=config.model or settings.DEFAULT_LLM_MODEL,
-                    temperature=float(config.temperature),
-                    max_completion_tokens=reply_tokens,
-                )
-                # AgentSession's automatic prewarm() call no-ops once these are
-                # wrapped in FallbackAdapter below (it doesn't forward to children),
-                # so the TLS/DNS warm-up never reached OpenAI/Groq without this —
-                # every call's first turn paid full connection setup on top of TTFT.
-                openai_llm.prewarm()
-
-            # LLM_PRIMARY chooses which provider runs first:
-            #   "openai" (default) — reliable, good quality, no rate-limit storm. Use this
-            #                        on Groq FREE tier (6000 TPM is too small for calls).
-            #   "groq"   — fast/cheap; only sensible on Groq DEV tier (paid, high limits).
-            # The other provider becomes the automatic fallback.
-            llm_primary = os.getenv("LLM_PRIMARY", "openai").strip().lower()
-            from livekit.agents import llm as _lk_llm
-
-            if groq_llm and openai_llm:
-                if llm_primary == "groq":
-                    llm = _lk_llm.FallbackAdapter([groq_llm, openai_llm])
-                    logger.info("LLM: Groq (primary) → OpenAI fallback (max_tokens=%d)", reply_tokens)
-                else:
-                    llm = _lk_llm.FallbackAdapter([openai_llm, groq_llm])
-                    logger.info("LLM: OpenAI (primary) → Groq fallback (max_tokens=%d)", reply_tokens)
-            elif openai_llm:
-                llm = openai_llm
-                logger.info("LLM: OpenAI %s (max_tokens=%d)", config.model or settings.DEFAULT_LLM_MODEL, reply_tokens)
-            elif groq_llm:
-                llm = groq_llm
-                logger.info(
-                    "LLM: Groq %s (max_tokens=%d) — NO OpenAI fallback "
-                    "(set OPENAI_API_KEY to avoid silence on 429)",
-                    groq_model,
-                    reply_tokens,
-                )
-            else:
-                raise RuntimeError("No LLM configured: set GROQ_API_KEY and/or OPENAI_API_KEY")
+            if not openai_key:
+                raise RuntimeError("No LLM configured: set OPENAI_API_KEY")
+            llm = openai.LLM(
+                model=config.model or settings.DEFAULT_LLM_MODEL,
+                temperature=float(config.temperature),
+                max_completion_tokens=reply_tokens,
+            )
+            # Called explicitly since AgentSession's automatic prewarm() only fires
+            # for objects that override _prewarm_impl directly — harmless/idempotent
+            # if the framework's own auto-prewarm already covered it.
+            llm.prewarm()
+            logger.info("LLM: OpenAI %s (max_tokens=%d)", config.model or settings.DEFAULT_LLM_MODEL, reply_tokens)
 
         explicit_tts = (getattr(config, "tts_provider", None) or "").strip().lower()
         tts_key_override = decrypt_secret(getattr(config, "tts_api_key", None))
@@ -721,9 +665,9 @@ class DynamicVoiceAgent(Agent):
     async def on_user_turn_completed(self, turn_ctx, new_message) -> None:
         """Deterministic transfer trigger — runs BEFORE the LLM.
 
-        Groq's 8b model emits tool calls unreliably (as text), so we detect a
-        clear human/transfer request by keyword and transfer directly. Raising
-        StopResponse prevents the LLM from generating a reply for this turn.
+        Detects a clear human/transfer request by keyword and transfers directly,
+        rather than relying on an LLM tool call. Raising StopResponse prevents the
+        LLM from generating a reply for this turn.
         """
         if not (self._transfer_enabled and self._transfer_number) or self._transfer_done:
             return

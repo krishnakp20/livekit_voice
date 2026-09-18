@@ -23,14 +23,6 @@ _OPT_OUT_SENTENCE_RE = re.compile(
 class AIService:
     def __init__(self) -> None:
         self._openai = AsyncOpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
-        # Groq as fallback for sentiment when OpenAI quota is exhausted
-        self._groq: AsyncOpenAI | None = None
-        _groq_key = settings.GROQ_API_KEY if hasattr(settings, "GROQ_API_KEY") else __import__("os").getenv("GROQ_API_KEY", "")
-        if _groq_key:
-            self._groq = AsyncOpenAI(
-                api_key=_groq_key,
-                base_url="https://api.groq.com/openai/v1",
-            )
 
     async def generate_response(
         self,
@@ -123,11 +115,7 @@ class AIService:
         return await self.analyze_call_sentiment(text)
 
     async def analyze_call_sentiment(self, caller_text: str) -> float:
-        """Score overall caller tone; neutral inquiries should be near 0.
-        Uses OpenAI gpt-4o-mini preferentially — Groq's fast models have proven
-        unstable to depend on here (their lineup gets deprecated/access-restricted
-        with no runtime fallback in place), so this avoids relying on Groq at all
-        when OpenAI is configured; falls back to Groq only if OpenAI isn't set up."""
+        """Score overall caller tone; neutral inquiries should be near 0."""
         if not (caller_text or "").strip():
             return 0.0
 
@@ -136,13 +124,11 @@ class AIService:
             {"role": "user", "content": caller_text.strip()},
         ]
 
-        client = self._openai or self._groq
-        model = "gpt-4o-mini" if self._openai else settings.GROQ_MODEL
-        if not client:
+        if not self._openai:
             return 0.0
 
-        response = await client.chat.completions.create(
-            model=model,
+        response = await self._openai.chat.completions.create(
+            model="gpt-4o-mini",
             messages=messages,
             max_tokens=10,
             temperature=0,
@@ -159,7 +145,7 @@ class AIService:
         """Extract structured fields from a call transcript.
 
         `fields` is a list like [{"key": "name", "description": "customer name"}, ...].
-        Returns a dict {key: value | null}. Uses Groq (fast) then OpenAI fallback.
+        Returns a dict {key: value | null}.
         """
         import json
 
@@ -226,16 +212,12 @@ class AIService:
             {"role": "user", "content": transcript.strip()[:6000]},
         ]
 
-        # Prefer OpenAI: extraction runs once per call and feeds the CRM push, so a
-        # Groq free-tier 429 here would silently drop the whole payload.
-        client = self._openai or self._groq
-        model = "gpt-4o-mini" if self._openai else "llama-3.3-70b-versatile"
-        if not client:
+        if not self._openai:
             return {}
 
         try:
-            response = await client.chat.completions.create(
-                model=model,
+            response = await self._openai.chat.completions.create(
+                model="gpt-4o-mini",
                 messages=messages,
                 max_tokens=400,
                 temperature=0,

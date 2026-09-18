@@ -78,14 +78,7 @@ class Settings(BaseSettings):
     # AI Providers
     OPENAI_API_KEY: str = ""
     SARVAM_API_KEY: str = ""
-    GROQ_API_KEY: str = ""
     DEFAULT_LLM_MODEL: str = "gpt-4o-mini"
-    # Groq model (used when LLM_PRIMARY=groq, else as the fallback). Set in code so no
-    # .env entry is needed. llama-3.3-70b-versatile = fast, non-reasoning, good Hindi,
-    # not deprecated (unlike llama-3.1-8b-instant, decommissioned 2026-08-16). Requires
-    # the Groq DEV tier — the free tier's 6000 TPM 429s on multi-turn calls.
-    # Override via .env (GROQ_MODEL=...) only if Groq changes their lineup.
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
     # Storage
     RECORDINGS_PATH: str = "/data/recordings"
@@ -160,8 +153,8 @@ class Settings(BaseSettings):
     # Used to compute and store STT/LLM/TTS cost per call in call_logs.
     # Override any of these in .env to match your actual provider contracts.
     COST_STT_PER_MINUTE: float = 0.0058      # Deepgram nova-2 streaming, per audio minute
-    COST_LLM_INPUT_PER_1M: float = 0.05      # Groq llama-3.1-8b-instant, per 1M input tokens
-    COST_LLM_OUTPUT_PER_1M: float = 0.08     # Groq llama-3.1-8b-instant, per 1M output tokens
+    COST_LLM_INPUT_PER_1M: float = 0.15      # OpenAI gpt-4o-mini, per 1M input tokens
+    COST_LLM_OUTPUT_PER_1M: float = 0.60     # OpenAI gpt-4o-mini, per 1M output tokens
     COST_TTS_PER_1M_CHARS: float = 40.0      # Cartesia sonic-3.5, per 1M characters
     # OpenAI Realtime (speech-to-speech) bills audio tokens directly — a different
     # rate from the text-LLM ones above. Default is the gpt-realtime flagship rate;

@@ -102,7 +102,6 @@ async def system_health(db: DbSession, current_user: CurrentUser):
     cartesia = bool(os.getenv("CARTESIA_API_KEY"))
     sarvam = bool(settings.SARVAM_API_KEY)
     openai_k = bool(os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY)
-    groq_k = bool(os.getenv("GROQ_API_KEY") or getattr(settings, "GROQ_API_KEY", ""))
 
     return {
         "livekit": status(livekit_ok),
@@ -111,5 +110,5 @@ async def system_health(db: DbSession, current_user: CurrentUser):
         "database": status(db_ok),
         "stt": "configured" if deepgram or sarvam else "not configured",
         "tts": "configured" if cartesia or sarvam else "not configured",
-        "llm": "configured" if openai_k or groq_k else "not configured",
+        "llm": "configured" if openai_k else "not configured",
     }
