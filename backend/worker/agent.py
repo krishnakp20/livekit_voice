@@ -107,10 +107,15 @@ from worker.recordings import (
     should_record_call,
 )
 
-logging.basicConfig(level=logging.DEBUG, force=True)
-logging.getLogger().setLevel(logging.DEBUG)
-logging.getLogger("livekit").setLevel(logging.DEBUG)
-logging.getLogger("livekit.agents").setLevel(logging.DEBUG)
+# DEBUG on livekit/livekit.agents writes a log line per audio frame/event — real
+# event-loop I/O overhead competing with the async LLM/STT/TTS network calls on the
+# same loop. Default to INFO in production; set LOG_LEVEL=DEBUG in .env when actively
+# debugging a specific call.
+_log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").strip().upper(), logging.INFO)
+logging.basicConfig(level=_log_level, force=True)
+logging.getLogger().setLevel(_log_level)
+logging.getLogger("livekit").setLevel(_log_level)
+logging.getLogger("livekit.agents").setLevel(_log_level)
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 logger = logging.getLogger("vbots.agent")
 
