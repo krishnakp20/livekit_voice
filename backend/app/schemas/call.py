@@ -13,6 +13,9 @@ class TranscriptEntry(BaseModel):
     content: str
     llm_response: Optional[str]
     latency_ms: Optional[int]
+    stt_ms: Optional[int]
+    llm_ms: Optional[int]
+    tts_ms: Optional[int]
     sentiment: Optional[float]
     sequence: int
     created_at: datetime

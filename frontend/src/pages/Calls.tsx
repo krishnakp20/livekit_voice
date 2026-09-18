@@ -9,6 +9,20 @@ interface TranscriptEntry {
   content: string;
   sentiment: number | null;
   sequence: number;
+  created_at: string;
+  stt_ms: number | null;
+  llm_ms: number | null;
+  tts_ms: number | null;
+}
+
+/** "M:SS" elapsed since the call started, matching the reference transcript view. */
+function elapsedLabel(callStartedAt: string, entryCreatedAt: string): string {
+  const startMs = new Date(callStartedAt).getTime();
+  const entryMs = new Date(entryCreatedAt).getTime();
+  const totalSeconds = Math.max(0, Math.round((entryMs - startMs) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 interface CallRow {
@@ -318,6 +332,12 @@ export default function Calls() {
                       <div key={t.id} className="text-xs">
                         <span className="font-semibold capitalize text-brand-700">{t.speaker}: </span>
                         <span>{t.content}</span>
+                        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-slate-400">
+                          <span>{elapsedLabel(detail.started_at, t.created_at)}</span>
+                          {t.stt_ms != null && <span>ASR {t.stt_ms} ms</span>}
+                          {t.llm_ms != null && <span>LLM {t.llm_ms} ms</span>}
+                          {t.tts_ms != null && <span>TTS {t.tts_ms} ms</span>}
+                        </div>
                       </div>
                     ))}
                   </div>

@@ -403,6 +403,9 @@ async def _save_transcript(
     content: str,
     llm_response: str | None = None,
     latency_ms: int | None = None,
+    stt_ms: int | None = None,
+    llm_ms: int | None = None,
+    tts_ms: int | None = None,
     sentiment: float | None = None,
 ) -> None:
     from sqlalchemy import func, select
@@ -423,6 +426,9 @@ async def _save_transcript(
             content=content,
             llm_response=llm_response,
             latency_ms=latency_ms,
+            stt_ms=stt_ms,
+            llm_ms=llm_ms,
+            tts_ms=tts_ms,
             sentiment=sentiment,
             sequence=seq,
         )
@@ -432,7 +438,14 @@ async def _save_transcript(
     await socket_manager.emit_transcript(
         client_id,
         call_id,
-        {"speaker": speaker, "content": content, "response": llm_response},
+        {
+            "speaker": speaker,
+            "content": content,
+            "response": llm_response,
+            "stt_ms": stt_ms,
+            "llm_ms": llm_ms,
+            "tts_ms": tts_ms,
+        },
     )
 
 
@@ -522,15 +535,24 @@ def attach_call_listeners(session: AgentSession, call_id: int, client_id: int) -
                 _new_turn(content)
             else:
                 bucket["current"].user_text = content
+            user_bucket = bucket["current"]
 
             async def _save_user_turn() -> None:
                 caller_lines.append(content)
                 await _update_call_sentiment(call_id, client_id, caller_lines)
+                # Read stt_api_s at save time (not capture time) — the STT metrics
+                # event that populates it can land slightly after this handler runs.
+                stt_ms = (
+                    int(user_bucket.stt_api_s * 1000)
+                    if user_bucket and user_bucket.stt_api_s
+                    else None
+                )
                 await _save_transcript(
                     call_id,
                     client_id,
                     speaker="user",
                     content=content,
+                    stt_ms=stt_ms,
                 )
 
             asyncio.create_task(_save_user_turn())
@@ -546,6 +568,8 @@ def attach_call_listeners(session: AgentSession, call_id: int, client_id: int) -
                     speaker="agent",
                     content=content,
                     llm_response=content,
+                    llm_ms=int(b.llm_ttft_s * 1000) if b.llm_ttft_s else None,
+                    tts_ms=int(b.tts_ttfb_s * 1000) if b.tts_ttfb_s else None,
                 )
             )
             logger.info("Agent replied (call_id=%s): %s", call_id, content[:120])

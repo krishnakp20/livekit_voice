@@ -124,7 +124,10 @@ class AIService:
 
     async def analyze_call_sentiment(self, caller_text: str) -> float:
         """Score overall caller tone; neutral inquiries should be near 0.
-        Uses Groq (llama-3.3-70b) preferentially; falls back to OpenAI gpt-4o-mini."""
+        Uses OpenAI gpt-4o-mini preferentially — Groq's fast models have proven
+        unstable to depend on here (their lineup gets deprecated/access-restricted
+        with no runtime fallback in place), so this avoids relying on Groq at all
+        when OpenAI is configured; falls back to Groq only if OpenAI isn't set up."""
         if not (caller_text or "").strip():
             return 0.0
 
@@ -133,9 +136,8 @@ class AIService:
             {"role": "user", "content": caller_text.strip()},
         ]
 
-        # Try Groq first (fast + free tier available)
-        client = self._groq or self._openai
-        model = "llama-3.3-70b-versatile" if self._groq else "gpt-4o-mini"
+        client = self._openai or self._groq
+        model = "gpt-4o-mini" if self._openai else settings.GROQ_MODEL
         if not client:
             return 0.0
 
@@ -191,16 +193,19 @@ class AIService:
             "- Convert spoken numbers into digits: 'six forty three' → 643, "
             "'double nine' → 99, 'ninety two' → 92, 'दस' → 10.\n"
             "- Phone numbers: digits only, exactly 10 digits for an Indian mobile. "
-            "Customers usually speak the digits across SEVERAL separate lines in the "
-            "transcript, not all at once — concatenate every digit-bearing line for "
-            "that number, in the order spoken, into one string. Example: if the "
-            "transcript has 'User: seven two' then 'User: nine zero zero' then 'User: "
-            "nine three nine zero three', concatenate to '7290093903'. If the number "
-            "is restated or re-confirmed later in the transcript, use that final "
-            "restated version. Rebuild carefully from spoken digits ('double nine' = "
-            "99, 'triple six' = 666). If, after concatenating every relevant line, the "
-            "result is still not exactly 10 digits, return null rather than a wrong "
-            "number.\n"
+            "Customers often need several attempts, spread across many lines, before "
+            "getting all 10 digits right — earlier attempts may be incomplete or "
+            "wrong. PRIORITIZE the agent's own explicit confirmation exchange: find "
+            "the LAST place where the Agent reads a 10-digit number back (e.g. 'Agent: "
+            "your number is 7 2 9 0 0 9 3 9 0 3, correct?') and the Customer replies "
+            "affirmatively (yes/haan/sahi/correct/right) — that agent-stated number is "
+            "the authoritative final answer, even if it differs from earlier customer "
+            "attempts. Only fall back to reconstructing digits from the customer's own "
+            "lines (concatenating in spoken order, e.g. 'seven two' + 'nine zero zero' "
+            "+ 'nine three nine zero three' → '7290093903') if the transcript never "
+            "reaches a clean agent-confirmed exchange. Rebuild carefully from spoken "
+            "digits ('double nine' = 99, 'triple six' = 666). If the result is still "
+            "not exactly 10 digits, return null rather than a wrong number.\n"
             "- If a field's description says not to capture/use the 'incoming' or "
             "'calling' number, that refers only to the caller-ID metadata of this "
             "call — a value that is NOT present anywhere in this transcript. It does "
