@@ -152,10 +152,14 @@ class Settings(BaseSettings):
     # ── Per-call cost rates (USD) ───────────────────────────────────────────
     # Used to compute and store STT/LLM/TTS cost per call in call_logs.
     # Override any of these in .env to match your actual provider contracts.
-    COST_STT_PER_MINUTE: float = 0.0058      # Deepgram nova-2 streaming, per audio minute
+    COST_STT_PER_MINUTE: float = 0.005833     # Deepgram nova-2 streaming: $0.35/hr per account billing
     COST_LLM_INPUT_PER_1M: float = 0.15      # OpenAI gpt-4o-mini, per 1M input tokens
     COST_LLM_OUTPUT_PER_1M: float = 0.60     # OpenAI gpt-4o-mini, per 1M output tokens
-    COST_TTS_PER_1M_CHARS: float = 40.0      # Cartesia sonic-3.5, per 1M characters
+    # These are the STANDARD-tier rates. With OPENAI_SERVICE_TIER=priority/fast, set
+    # COST_LLM_INPUT_PER_1M=0.25 and COST_LLM_OUTPUT_PER_1M=1.00 in .env.
+    # Cartesia Pro plan: $5/mo for 100K credits, 1 credit = 1 character (per-1M-chars
+    # figure derived from that; update if the plan or conversion changes).
+    COST_TTS_PER_1M_CHARS: float = 50.0      # Cartesia sonic-3.5, per 1M characters
     # OpenAI Realtime (speech-to-speech) bills audio tokens directly — a different
     # rate from the text-LLM ones above. Default is the gpt-realtime flagship rate;
     # gpt-realtime-mini is roughly 1/3 of this — override in .env if you switch.

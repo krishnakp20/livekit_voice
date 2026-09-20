@@ -117,6 +117,11 @@ logging.getLogger().setLevel(_log_level)
 logging.getLogger("livekit").setLevel(_log_level)
 logging.getLogger("livekit.agents").setLevel(_log_level)
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
+# Optional OpenAI service tier for chat completions (e.g. "priority"/"fast" — lower and
+# more consistent latency at a higher per-token price). Unset = standard tier.
+_OPENAI_SERVICE_TIER = os.getenv("OPENAI_SERVICE_TIER", "").strip()
+_tier_kwargs = {"service_tier": _OPENAI_SERVICE_TIER} if _OPENAI_SERVICE_TIER else {}
 logger = logging.getLogger("vbots.agent")
 
 # Deterministic transfer triggers — matched against the customer's transcript.
@@ -407,6 +412,7 @@ class DynamicVoiceAgent(Agent):
                 model=config.model or settings.DEFAULT_LLM_MODEL,
                 temperature=float(config.temperature),
                 max_completion_tokens=reply_tokens,
+                **_tier_kwargs,
                 **({"api_key": llm_key_override} if llm_key_override else {}),
             )
             logger.info(
@@ -482,12 +488,17 @@ class DynamicVoiceAgent(Agent):
                 model=config.model or settings.DEFAULT_LLM_MODEL,
                 temperature=float(config.temperature),
                 max_completion_tokens=reply_tokens,
+                **_tier_kwargs,
             )
             # Called explicitly since AgentSession's automatic prewarm() only fires
             # for objects that override _prewarm_impl directly — harmless/idempotent
             # if the framework's own auto-prewarm already covered it.
             llm.prewarm()
-            logger.info("LLM: OpenAI %s (max_tokens=%d)", config.model or settings.DEFAULT_LLM_MODEL, reply_tokens)
+            logger.info(
+                "LLM: OpenAI %s (max_tokens=%d, service_tier=%s)",
+                config.model or settings.DEFAULT_LLM_MODEL, reply_tokens,
+                _OPENAI_SERVICE_TIER or "standard",
+            )
 
         explicit_tts = (getattr(config, "tts_provider", None) or "").strip().lower()
         tts_key_override = decrypt_secret(getattr(config, "tts_api_key", None))
