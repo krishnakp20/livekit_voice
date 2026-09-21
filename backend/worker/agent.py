@@ -836,8 +836,13 @@ async def finalize_call_log(
     callee_answered: bool = True,
     transferred: bool = False,
     transfer_to: str | None = None,
+    ended_at: "datetime | None" = None,
 ) -> None:
-    """Mark call completed/failed/transferred when LiveKit room ends."""
+    """Mark call completed/failed/transferred when LiveKit room ends.
+
+    `ended_at` is when the caller actually left. The room (and this shutdown
+    callback) only closes ~20s later (LiveKit departure timeout), so stamping "now"
+    here inflated every call's duration by that teardown time."""
     try:
         from datetime import datetime, timezone
 
@@ -862,7 +867,7 @@ async def finalize_call_log(
             if not call or call.status not in (CallStatus.ACTIVE, CallStatus.RINGING):
                 return
 
-            now = datetime.now(timezone.utc)
+            now = ended_at or datetime.now(timezone.utc)
             # Capture whether callee actually answered BEFORE changing status
             was_active = call.status == CallStatus.ACTIVE
             if transferred:
@@ -1047,6 +1052,10 @@ async def entrypoint(ctx: JobContext):
     )
 
     session_failed = {"value": False}
+    # When the session closed (caller hung up / transfer done). The shutdown callback
+    # runs ~20s later when LiveKit closes the empty room, so it must not be the
+    # end-of-call timestamp.
+    call_ended_at = {"value": None}
     # Inbound: caller is already in room → always answered
     # Outbound: only True after wait_for_participant() succeeds (callee picks up)
     callee_answered = {"value": not is_outbound_room}
@@ -1063,6 +1072,7 @@ async def entrypoint(ctx: JobContext):
             callee_answered=callee_answered["value"],
             transferred=transferred,
             transfer_to=transfer_to,
+            ended_at=call_ended_at["value"],
         )
         # Compute + store STT/LLM/TTS cost from accumulated usage
         if call_id:
@@ -1176,6 +1186,10 @@ async def entrypoint(ctx: JobContext):
 
     @session.on("close")
     def _on_session_close(ev) -> None:
+        if call_ended_at["value"] is None:
+            from datetime import datetime, timezone
+
+            call_ended_at["value"] = datetime.now(timezone.utc)
         # Do NOT mark failed on normal participant-disconnect close.
         # livekit-agents sets ev.error when close_on_disconnect fires (caller hangs up)
         # — that is a successful call end, not a failure.
