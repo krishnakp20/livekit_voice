@@ -84,11 +84,15 @@ export function Sidebar() {
 
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-60 flex-col border-r border-slate-200 bg-white">
-      <div className="flex h-16 shrink-0 items-center gap-2 border-b border-slate-100 px-5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
-          V
-        </div>
-        <span className="text-base font-semibold text-slate-900">VBots</span>
+      <div className="flex h-16 shrink-0 items-center border-b border-slate-100 px-5">
+        <img
+          src="/dialdesk-logo.png"
+          alt="DialDesk"
+          width={150}
+          height={50}
+          className="h-[50px] w-[150px] select-none object-contain"
+          draggable={false}
+        />
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4">

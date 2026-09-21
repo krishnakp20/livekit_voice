@@ -96,9 +96,9 @@ export default function Login() {
   };
 
   return (
-    <div className="grid min-h-screen bg-white lg:grid-cols-[1.05fr_1fr]">
+    <div className="grid min-h-screen bg-white lg:h-screen lg:grid-cols-[1.05fr_1fr] lg:overflow-hidden">
       {/* ── Brand panel (desktop) ───────────────────────────────────────── */}
-      <aside className="relative hidden overflow-hidden bg-gradient-to-br from-brand-700 via-brand-800 to-slate-900 p-12 text-white lg:flex lg:flex-col lg:justify-between">
+      <aside className="relative hidden min-h-0 overflow-hidden bg-gradient-to-br from-brand-700 via-brand-800 to-slate-900 p-10 text-white lg:flex lg:flex-col lg:justify-between xl:p-12">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 opacity-100"
@@ -126,7 +126,7 @@ export default function Login() {
         </div>
 
         <div className="relative max-w-lg">
-          <div className="mb-8 flex h-16 items-end gap-1.5" aria-hidden>
+          <div className="mb-6 flex h-12 items-end gap-1.5 [@media(max-height:800px)]:hidden" aria-hidden>
             {WAVE_BARS.map((h, i) => (
               <span
                 key={i}
@@ -140,14 +140,14 @@ export default function Login() {
               />
             ))}
           </div>
-          <h1 className="text-4xl font-semibold leading-tight tracking-tight text-white">
+          <h1 className="text-3xl font-semibold leading-tight tracking-tight text-white xl:text-4xl">
             Voice AI that talks to your customers, like your best agent.
           </h1>
-          <p className="mt-4 text-base leading-relaxed text-brand-100/90">
-            VBots by DialDesk — build, launch and monitor AI voice agents from one dashboard.
+          <p className="mt-3 text-base leading-relaxed text-brand-100/90 [@media(max-height:700px)]:hidden">
+            Build, launch and monitor AI voice agents from one dashboard.
           </p>
 
-          <ul className="mt-10 space-y-5">
+          <ul className="mt-8 space-y-4 [@media(max-height:600px)]:hidden">
             {FEATURES.map(({ icon: Icon, title, text }) => (
               <li key={title} className="flex items-start gap-4">
                 <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/15 backdrop-blur">
@@ -155,7 +155,9 @@ export default function Login() {
                 </span>
                 <span>
                   <span className="block text-sm font-semibold text-white">{title}</span>
-                  <span className="block text-sm text-brand-100/80">{text}</span>
+                  <span className="block text-sm text-brand-100/80 [@media(max-height:760px)]:hidden">
+                    {text}
+                  </span>
                 </span>
               </li>
             ))}
@@ -168,7 +170,7 @@ export default function Login() {
       </aside>
 
       {/* ── Form panel ──────────────────────────────────────────────────── */}
-      <main className="flex items-center justify-center bg-gradient-to-b from-white to-slate-50 px-6 py-12 sm:px-10">
+      <main className="flex min-h-0 items-center justify-center bg-gradient-to-b from-white to-slate-50 px-6 py-8 sm:px-10 lg:overflow-y-auto">
         <div className="w-full max-w-sm">
           <div className="mb-10 lg:hidden">
             <Logo />
@@ -178,7 +180,7 @@ export default function Login() {
             <>
               <div className="mb-8">
                 <h2 className="text-2xl font-semibold tracking-tight text-slate-900">Welcome back</h2>
-                <p className="mt-1.5 text-sm text-slate-500">Sign in to your VBots dashboard.</p>
+                <p className="mt-1.5 text-sm text-slate-500">Sign in to your dashboard.</p>
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-5">
