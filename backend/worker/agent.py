@@ -155,6 +155,19 @@ _TRANSFER_KEYWORDS = (
     "connect kar",
     "senior se",
     "bade officer",
+    # Deepgram returns Hindi words in Devanagari (English words stay Latin), so the
+    # transliterated Hinglish keywords above never match e.g. "connect कर दीजिए".
+    "connect कर",
+    "दीजिए connect",
+    "कनेक्ट कर",
+    "ट्रांसफर",
+    "सुपरवाइजर",
+    "सीनियर",
+    "मैनेजर",
+    "इंसान",
+    "बात करवा",
+    "बात करा",
+    "किसी से बात",
 )
 
 # OpenAI Realtime only accepts these voice names — NOT Cartesia/ElevenLabs voice
@@ -190,30 +203,39 @@ def _warm_llm_path() -> None:
         return
     if not os.getenv("OPENAI_API_KEY"):
         return
-    try:
-        import asyncio
+    import asyncio
+    import threading
 
-        from livekit.agents import llm as _lk_llm
+    from livekit.agents import llm as _lk_llm
 
-        async def _go() -> None:
-            warm_llm = openai.LLM(
-                model=settings.DEFAULT_LLM_MODEL,
-                max_completion_tokens=1,
-                **_tier_kwargs,
-            )
-            try:
-                ctx = _lk_llm.ChatContext()
-                ctx.add_message(role="user", content="hi")
-                async with warm_llm.chat(chat_ctx=ctx) as stream:
-                    async for _ in stream:
-                        pass
-            finally:
-                await warm_llm.aclose()
+    async def _go() -> None:
+        warm_llm = openai.LLM(
+            model=settings.DEFAULT_LLM_MODEL,
+            max_completion_tokens=1,
+            **_tier_kwargs,
+        )
+        try:
+            ctx = _lk_llm.ChatContext()
+            ctx.add_message(role="user", content="hi")
+            async with warm_llm.chat(chat_ctx=ctx) as stream:
+                async for _ in stream:
+                    pass
+        finally:
+            await warm_llm.aclose()
 
-        asyncio.run(asyncio.wait_for(_go(), timeout=5))
-        logger.info("LLM warm-up completed")
-    except Exception as e:
-        logger.warning("LLM warm-up skipped: %s", e)
+    def _run() -> None:
+        try:
+            asyncio.run(asyncio.wait_for(_go(), timeout=5))
+            logger.info("LLM warm-up completed")
+        except Exception as e:
+            logger.warning("LLM warm-up skipped: %s", e)
+
+    # Daemon thread + bounded join: if the network stalls, cancelling the request can
+    # itself hang (one pool process exceeded the 10s init timeout and was killed), so
+    # process init must never wait on it for more than a few seconds.
+    t = threading.Thread(target=_run, name="llm-warmup", daemon=True)
+    t.start()
+    t.join(timeout=4)
 
 
 _TOKEN_RE = re.compile(r"\{([a-zA-Z0-9_ ]+)\}")

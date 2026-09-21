@@ -98,7 +98,7 @@ export default function Login() {
   return (
     <div className="grid min-h-screen bg-white lg:h-screen lg:grid-cols-[1.05fr_1fr] lg:overflow-hidden">
       {/* ── Brand panel (desktop) ───────────────────────────────────────── */}
-      <aside className="relative hidden min-h-0 overflow-hidden bg-gradient-to-br from-brand-700 via-brand-800 to-slate-900 p-10 text-white lg:flex lg:flex-col lg:justify-between xl:p-12">
+      <aside className="relative hidden min-h-0 overflow-hidden bg-gradient-to-br from-brand-700 via-brand-800 to-slate-900 p-[clamp(20px,4.5vh,48px)] text-white lg:flex lg:flex-col lg:justify-between">
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 opacity-100"
@@ -120,7 +120,7 @@ export default function Login() {
         />
 
         <div className="relative">
-          <div className="inline-flex rounded-2xl bg-white px-4 py-2.5 shadow-lg shadow-black/20">
+          <div className="inline-flex rounded-2xl bg-white px-4 py-[clamp(4px,1.2vh,10px)] shadow-lg shadow-black/20">
             <Logo />
           </div>
         </div>
@@ -140,22 +140,22 @@ export default function Login() {
               />
             ))}
           </div>
-          <h1 className="text-3xl font-semibold leading-tight tracking-tight text-white xl:text-4xl">
+          <h1 className="text-[clamp(1.5rem,4.6vh,2.25rem)] font-semibold leading-tight tracking-tight text-white">
             Voice AI that talks to your customers, like your best agent.
           </h1>
-          <p className="mt-3 text-base leading-relaxed text-brand-100/90 [@media(max-height:700px)]:hidden">
+          <p className="mt-[clamp(6px,1.4vh,12px)] text-[clamp(0.8rem,1.9vh,1rem)] leading-relaxed text-brand-100/90">
             Build, launch and monitor AI voice agents from one dashboard.
           </p>
 
-          <ul className="mt-8 space-y-4 [@media(max-height:600px)]:hidden">
+          <ul className="mt-[clamp(14px,3.2vh,32px)] space-y-[clamp(8px,1.9vh,16px)] [@media(max-height:430px)]:hidden">
             {FEATURES.map(({ icon: Icon, title, text }) => (
-              <li key={title} className="flex items-start gap-4">
-                <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/15 backdrop-blur">
-                  <Icon className="h-5 w-5 text-brand-100" />
+              <li key={title} className="flex items-start gap-3.5">
+                <span className="flex h-[clamp(30px,4.8vh,40px)] w-[clamp(30px,4.8vh,40px)] shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/15 backdrop-blur">
+                  <Icon className="h-[clamp(16px,2.4vh,20px)] w-[clamp(16px,2.4vh,20px)] text-brand-100" />
                 </span>
                 <span>
-                  <span className="block text-sm font-semibold text-white">{title}</span>
-                  <span className="block text-sm text-brand-100/80 [@media(max-height:760px)]:hidden">
+                  <span className="block text-sm font-semibold leading-snug text-white">{title}</span>
+                  <span className="block text-[clamp(0.75rem,1.7vh,0.875rem)] leading-snug text-brand-100/80">
                     {text}
                   </span>
                 </span>
