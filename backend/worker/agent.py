@@ -175,6 +175,45 @@ def prewarm(proc: JobProcess) -> None:
         min_silence_duration=0.15,
         prefix_padding_duration=0.15,
     )
+    _warm_llm_path()
+
+
+def _warm_llm_path() -> None:
+    """Run one throwaway 1-token chat completion while this process sits idle in the
+    pool, before any call is assigned. Every call runs in a fresh process, and the
+    first real LLM request there was 2-8s vs ~0.5-1.3s afterwards even on OpenAI's
+    priority tier — consistent with one-time cold-path cost inside the process. A
+    models.list() prewarm doesn't exercise the chat-completions code path. Never
+    allowed to break process init (own timeout, all errors swallowed). Disable with
+    LLM_WARMUP=0."""
+    if os.getenv("LLM_WARMUP", "1").strip().lower() in ("0", "false", "no", "off"):
+        return
+    if not os.getenv("OPENAI_API_KEY"):
+        return
+    try:
+        import asyncio
+
+        from livekit.agents import llm as _lk_llm
+
+        async def _go() -> None:
+            warm_llm = openai.LLM(
+                model=settings.DEFAULT_LLM_MODEL,
+                max_completion_tokens=1,
+                **_tier_kwargs,
+            )
+            try:
+                ctx = _lk_llm.ChatContext()
+                ctx.add_message(role="user", content="hi")
+                async with warm_llm.chat(chat_ctx=ctx) as stream:
+                    async for _ in stream:
+                        pass
+            finally:
+                await warm_llm.aclose()
+
+        asyncio.run(asyncio.wait_for(_go(), timeout=5))
+        logger.info("LLM warm-up completed")
+    except Exception as e:
+        logger.warning("LLM warm-up skipped: %s", e)
 
 
 _TOKEN_RE = re.compile(r"\{([a-zA-Z0-9_ ]+)\}")
