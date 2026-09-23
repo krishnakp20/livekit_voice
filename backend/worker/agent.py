@@ -466,6 +466,15 @@ class DynamicVoiceAgent(Agent):
                 "using OpenAI instead", getattr(config, "id", "?"),
             )
             explicit_llm = "openai"
+        sarvam_llm_key = ""
+        if explicit_llm == "sarvam":
+            sarvam_llm_key = llm_key_override or os.getenv("SARVAM_API_KEY", "")
+            if not sarvam_llm_key:
+                logger.error(
+                    "Agent %s has llm_provider='sarvam' but no SARVAM_API_KEY is set — "
+                    "using OpenAI instead", getattr(config, "id", "?"),
+                )
+                explicit_llm = "openai"
         if explicit_llm == "openai":
             # Explicit provider chosen in the UI: falls back to the global key if no
             # per-agent key is set.
@@ -479,6 +488,29 @@ class DynamicVoiceAgent(Agent):
             logger.info(
                 "LLM: OpenAI %s (max_tokens=%d) [explicit]",
                 config.model or settings.DEFAULT_LLM_MODEL, reply_tokens,
+            )
+        elif explicit_llm == "sarvam":
+            # Built on the OpenAI-compatible client rather than livekit's sarvam.LLM,
+            # which rejects "sarvam-105b-conversations" (the voice-tuned model). Sarvam
+            # models think by default (adds seconds to first token, and reasoning tokens
+            # are billed), so reasoning_effort is sent as an explicit null.
+            sarvam_model = (
+                config.model
+                if (config.model or "").startswith("sarvam")
+                else "sarvam-105b-conversations"
+            )
+            llm = openai.LLM(
+                model=sarvam_model,
+                api_key=sarvam_llm_key,
+                base_url="https://api.sarvam.ai/v1",
+                temperature=float(config.temperature),
+                extra_headers={"api-subscription-key": sarvam_llm_key},
+                extra_body={"max_tokens": reply_tokens, "reasoning_effort": None},
+            )
+            llm.prewarm()
+            logger.info(
+                "LLM: Sarvam %s (max_tokens=%d, thinking off) [explicit]",
+                sarvam_model, reply_tokens,
             )
         elif use_realtime:
             # Speech-to-speech: one model handles listening + thinking + speaking.

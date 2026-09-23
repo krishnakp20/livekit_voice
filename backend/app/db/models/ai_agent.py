@@ -75,7 +75,7 @@ class AIAgent(Base):
     # blank/NULL means "use the company's global key for that provider".
     stt_provider: Mapped[Optional[str]] = mapped_column(String(20))   # "deepgram" | "sarvam"
     stt_api_key: Mapped[Optional[str]] = mapped_column(Text)
-    llm_provider: Mapped[Optional[str]] = mapped_column(String(20))   # "openai" (a stored "groq" value is treated as "openai" — Groq is no longer supported)
+    llm_provider: Mapped[Optional[str]] = mapped_column(String(20))   # "openai" | "sarvam" (a stored "groq" value is treated as "openai" — Groq is no longer supported)
     llm_api_key: Mapped[Optional[str]] = mapped_column(Text)
     tts_provider: Mapped[Optional[str]] = mapped_column(String(20))   # "cartesia" | "sarvam" | "elevenlabs"
     tts_api_key: Mapped[Optional[str]] = mapped_column(Text)
