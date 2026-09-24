@@ -120,6 +120,8 @@ logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 # Optional OpenAI service tier for chat completions (e.g. "priority"/"fast" — lower and
 # more consistent latency at a higher per-token price). Unset = standard tier.
+# Deepgram STT model; set DEEPGRAM_MODEL=nova-2 to roll back.
+_DEEPGRAM_MODEL = os.getenv("DEEPGRAM_MODEL", "nova-3")
 _OPENAI_SERVICE_TIER = os.getenv("OPENAI_SERVICE_TIER", "").strip()
 _tier_kwargs = {"service_tier": _OPENAI_SERVICE_TIER} if _OPENAI_SERVICE_TIER else {}
 logger = logging.getLogger("vbots.agent")
@@ -322,7 +324,7 @@ class DynamicVoiceAgent(Agent):
             logger.info("STT: skipped — OpenAI Realtime (STS) handles audio directly [explicit]")
         elif explicit_stt == "deepgram" and _DEEPGRAM_AVAILABLE:
             stt = deepgram_plugin.STT(
-                model="nova-2",
+                model=_DEEPGRAM_MODEL,
                 language=provider_lang,
                 smart_format=False,
                 punctuate=False,
@@ -331,7 +333,7 @@ class DynamicVoiceAgent(Agent):
                 no_delay=True,
                 **({"api_key": stt_key_override} if stt_key_override else {}),
             )
-            logger.info("STT: Deepgram nova-2 (%s, 8kHz, endpointing=50ms) [explicit]", provider_lang)
+            logger.info("STT: Deepgram %s (%s, 8kHz, endpointing=50ms) [explicit]", _DEEPGRAM_MODEL, provider_lang)
         elif explicit_stt == "sarvam":
             stt = sarvam.STT(
                 language=lang_code,
@@ -353,7 +355,7 @@ class DynamicVoiceAgent(Agent):
                 # English words in Latin script; the LLM understands both fine.
                 # sample_rate=8000: MUST stay 8000 — SIP PSTN narrowband.
                 stt = deepgram_plugin.STT(
-                    model="nova-2",
+                    model=_DEEPGRAM_MODEL,
                     language=provider_lang,
                     smart_format=False,
                     punctuate=False,
@@ -361,7 +363,7 @@ class DynamicVoiceAgent(Agent):
                     endpointing_ms=50,
                     no_delay=True,
                 )
-                logger.info("STT: Deepgram nova-2 (%s, 8kHz, endpointing=50ms)", provider_lang)
+                logger.info("STT: Deepgram %s (%s, 8kHz, endpointing=50ms)", _DEEPGRAM_MODEL, provider_lang)
             elif use_sarvam:
                 stt = sarvam.STT(
                     language=lang_code,
