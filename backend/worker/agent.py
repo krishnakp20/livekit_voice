@@ -124,6 +124,13 @@ logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 # more consistent latency at a higher per-token price). Unset = standard tier.
 # Deepgram STT model; set DEEPGRAM_MODEL=nova-2 to roll back.
 _DEEPGRAM_MODEL = os.getenv("DEEPGRAM_MODEL", "nova-3")
+# Turn-commit watchdog: in turn_detection="stt" mode a caller turn only ends when Deepgram
+# sends `speech_final`. If it never does, the transcript is logged but the agent stays silent
+# until the caller speaks again (seen as 13-30 s dead air). This commits the turn if the agent
+# has not started replying this many seconds after a final transcript. 0 disables.
+_TURN_COMMIT_WATCHDOG_S = float(os.getenv("TURN_COMMIT_WATCHDOG_SECONDS", "1.2"))
+# INFO log line for every user/agent state change (turn timeline). LOG_TURN_STATES=0 to silence.
+_LOG_TURN_STATES = os.getenv("LOG_TURN_STATES", "1").strip().lower() not in ("0", "false", "no")
 _OPENAI_SERVICE_TIER = os.getenv("OPENAI_SERVICE_TIER", "").strip()
 _tier_kwargs = {"service_tier": _OPENAI_SERVICE_TIER} if _OPENAI_SERVICE_TIER else {}
 logger = logging.getLogger("vbots.agent")
@@ -1073,6 +1080,87 @@ def _start_silence_watchdog(session: AgentSession, room_name: str, timeout_secon
     return asyncio.create_task(_watch())
 
 
+def _install_turn_diagnostics(session: AgentSession, room_name: str) -> None:
+    """Turn timeline logging + the turn-commit watchdog (see _TURN_COMMIT_WATCHDOG_S)."""
+    t0 = time.monotonic()
+    st = {"agent": "initializing", "user": "listening", "pending": None, "timer": None, "fired": 0}
+
+    def _cancel_timer() -> None:
+        timer = st["timer"]
+        if timer is not None and not timer.done():
+            timer.cancel()
+        st["timer"] = None
+
+    def _arm() -> None:
+        if _TURN_COMMIT_WATCHDOG_S <= 0 or st["pending"] is None:
+            return
+        _cancel_timer()
+        st["timer"] = asyncio.ensure_future(_fire())
+
+    async def _fire() -> None:
+        try:
+            await asyncio.sleep(_TURN_COMMIT_WATCHDOG_S)
+            text = st["pending"]
+            # Agent already replying → the normal flow is working. The caller's user-state is
+            # deliberately NOT checked: when Deepgram never sends speech_final it stays
+            # "speaking" forever, which is exactly the case this watchdog exists for. Real
+            # continued speech keeps producing transcripts, which re-arm the timer.
+            if text is None or st["agent"] in ("thinking", "speaking"):
+                return
+            st["pending"] = None
+            st["fired"] += 1
+            logger.warning(
+                "Turn-commit watchdog: no end-of-turn %.1fs after final transcript %r "
+                "(agent=%s user=%s, fired=%d) — committing turn room=%s",
+                _TURN_COMMIT_WATCHDOG_S, text[:80], st["agent"], st["user"], st["fired"], room_name,
+            )
+            await asyncio.wait_for(session.commit_user_turn(transcript_timeout=0.3), timeout=5)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Turn-commit watchdog: commit failed room=%s", room_name)
+
+    def _log(kind: str, old: str, new: str) -> None:
+        if _LOG_TURN_STATES:
+            logger.info("TURN-STATE +%.2fs %s: %s -> %s", time.monotonic() - t0, kind, old, new)
+
+    @session.on("user_input_transcribed")
+    def _on_transcript(ev) -> None:
+        text = (getattr(ev, "transcript", "") or "").strip()
+        if not text:
+            return
+        if getattr(ev, "is_final", False):
+            st["pending"] = ev.transcript
+        # Any transcript activity (interim or final) restarts the countdown, so it fires
+        # `_TURN_COMMIT_WATCHDOG_S` after the LAST words the caller said.
+        if st["pending"] is not None and st["agent"] in ("listening", "idle"):
+            _arm()
+
+    @session.on("user_state_changed")
+    def _on_user_state(ev) -> None:
+        _log("user", ev.old_state, ev.new_state)
+        st["user"] = ev.new_state
+        if ev.new_state != "speaking" and st["agent"] in ("listening", "idle"):
+            _arm()
+
+    @session.on("agent_state_changed")
+    def _on_agent_state(ev) -> None:
+        _log("agent", ev.old_state, ev.new_state)
+        st["agent"] = ev.new_state
+        if ev.new_state == "thinking":
+            st["pending"] = None  # a reply is being generated: the turn was consumed
+            _cancel_timer()
+        elif ev.new_state == "speaking":
+            _cancel_timer()
+        elif ev.new_state in ("listening", "idle"):
+            # e.g. the caller spoke over the greeting: the transcript was never answered
+            _arm()
+
+    @session.on("close")
+    def _on_close(_ev) -> None:
+        _cancel_timer()
+
+
 async def entrypoint(ctx: JobContext):
     room_name = ctx.room.name
     logger.info(
@@ -1318,6 +1406,9 @@ async def entrypoint(ctx: JobContext):
         def _cancel_silence_watchdog(_ev) -> None:
             if silence_watchdog_task and not silence_watchdog_task.done():
                 silence_watchdog_task.cancel()
+
+    if _TURN_COMMIT_WATCHDOG_S > 0 or _LOG_TURN_STATES:
+        _install_turn_diagnostics(session, ctx.room.name)
 
     # Build personalised greeting. Substitute {tokens} from the lead's fields first;
     # if the greeting has NO tokens but we know the lead's name, prepend a friendly
