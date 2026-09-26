@@ -77,7 +77,7 @@ class AIAgent(Base):
     stt_api_key: Mapped[Optional[str]] = mapped_column(Text)
     llm_provider: Mapped[Optional[str]] = mapped_column(String(20))   # "openai" | "sarvam" (a stored "groq" value is treated as "openai" — Groq is no longer supported)
     llm_api_key: Mapped[Optional[str]] = mapped_column(Text)
-    tts_provider: Mapped[Optional[str]] = mapped_column(String(20))   # "cartesia" | "sarvam" | "elevenlabs"
+    tts_provider: Mapped[Optional[str]] = mapped_column(String(20))   # "cartesia" | "sarvam" | "elevenlabs" | "bodhi"
     tts_api_key: Mapped[Optional[str]] = mapped_column(Text)
 
     # LiveKit

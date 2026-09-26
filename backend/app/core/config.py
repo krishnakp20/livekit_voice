@@ -160,6 +160,8 @@ class Settings(BaseSettings):
     # Cartesia Pro plan: $5/mo for 100K credits, 1 credit = 1 character (per-1M-chars
     # figure derived from that; update if the plan or conversion changes).
     COST_TTS_PER_1M_CHARS: float = 50.0      # Cartesia sonic-3.5, per 1M characters
+    # Bodhi (Navana) TTS: Rs 12 per 10,000 chars = Rs 1,200 per 1M chars; at ~Rs 88/USD.
+    COST_TTS_BODHI_PER_1M_CHARS: float = 13.64
     # OpenAI Realtime (speech-to-speech) bills audio tokens directly — a different
     # rate from the text-LLM ones above. Default is the gpt-realtime flagship rate;
     # gpt-realtime-mini is roughly 1/3 of this — override in .env if you switch.

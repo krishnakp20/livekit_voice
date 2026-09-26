@@ -59,6 +59,7 @@ except ImportError:
         class StopResponse(Exception):  # type: ignore
             """Fallback if the SDK doesn't expose StopResponse."""
 
+from livekit.agents import tts as lk_tts
 from livekit.plugins import openai, sarvam, silero
 
 try:
@@ -100,6 +101,7 @@ from worker.config_loader import (
     parse_metadata,
     resolve_agent_id,
 )
+from worker.bodhi_tts import build_bodhi_tts, resolve_api_key as _bodhi_api_key
 from worker.call_tracking import attach_call_listeners
 from worker.recordings import (
     persist_session_artifacts,
@@ -283,6 +285,15 @@ def _cartesia_voice_for(config) -> str:
     if len(v) >= 32 and v.count("-") >= 4:  # looks like a Cartesia voice UUID
         return v
     return settings.CARTESIA_VOICE_ID or os.getenv("CARTESIA_VOICE_ID", "")
+
+
+def _bodhi_voice_for(config) -> str:
+    """Bodhi voice: the agent's `voice` if it is a Bodhi id (default_male/default_female or a
+    cloned cv_... voice), otherwise default_female/default_male from the agent's gender."""
+    v = (getattr(config, "voice", "") or "").strip()
+    if v in ("default_female", "default_male") or v.startswith("cv_"):
+        return v
+    return "default_male" if (getattr(config, "gender", "female") or "").lower() == "male" else "default_female"
 
 
 class DynamicVoiceAgent(Agent):
@@ -598,6 +609,10 @@ class DynamicVoiceAgent(Agent):
         explicit_tts = (getattr(config, "tts_provider", None) or "").strip().lower()
         tts_key_override = decrypt_secret(getattr(config, "tts_api_key", None))
         cartesia_voice = _cartesia_voice_for(config)
+        bodhi_key = _bodhi_api_key(tts_key_override) if explicit_tts == "bodhi" else ""
+        if explicit_tts == "bodhi" and not bodhi_key:
+            logger.error("TTS: Bodhi selected but no API key (BODHI_API_KEY) — using default provider")
+            explicit_tts = ""
 
         if use_realtime:
             tts = None
@@ -611,6 +626,33 @@ class DynamicVoiceAgent(Agent):
                 **({"api_key": tts_key_override} if tts_key_override else {}),
             )
             logger.info("TTS: Cartesia sonic-3.5 voice=%s (%s) [explicit]", cartesia_voice, provider_lang)
+        elif explicit_tts == "bodhi":
+            bodhi_tts = build_bodhi_tts(
+                api_key=bodhi_key,
+                voice=_bodhi_voice_for(config),
+                lang=provider_lang,
+                sample_rate=settings.AGENT_AUDIO_SAMPLE_RATE,
+                use_fast=os.getenv("BODHI_USE_FAST", "").strip().lower() in ("1", "true", "yes"),
+            )
+            cartesia_key = os.getenv("CARTESIA_API_KEY", "")
+            if _CARTESIA_AVAILABLE and cartesia_key and cartesia_voice:
+                # Bodhi is a young service: if a sentence fails, that turn is spoken by
+                # Cartesia instead of going silent. Costs are then billed at Bodhi rates in
+                # the COST line (slightly under-stated for any fallback sentences).
+                tts = lk_tts.FallbackAdapter([
+                    bodhi_tts,
+                    cartesia_plugin.TTS(
+                        model="sonic-3.5",
+                        voice=cartesia_voice,
+                        language=provider_lang,
+                        sample_rate=settings.AGENT_AUDIO_SAMPLE_RATE,
+                    ),
+                ])
+                logger.info("TTS: Bodhi voice=%s (%s) with Cartesia fallback [explicit]", _bodhi_voice_for(config), provider_lang)
+            else:
+                tts = bodhi_tts
+                logger.info("TTS: Bodhi voice=%s (%s), no fallback configured [explicit]", _bodhi_voice_for(config), provider_lang)
+            tts.prewarm()
         elif explicit_tts == "sarvam":
             tts = sarvam.TTS(
                 model=settings.AGENT_TTS_MODEL,
@@ -1257,7 +1299,14 @@ async def entrypoint(ctx: JobContext):
                 session_failed["value"] = True
 
     if call_id:
-        attach_call_listeners(session, call_id, config.client_id)
+        attach_call_listeners(
+            session, call_id, config.client_id,
+            tts_price_per_1m=(
+                settings.COST_TTS_BODHI_PER_1M_CHARS
+                if (getattr(config, "tts_provider", "") or "").strip().lower() == "bodhi"
+                else None
+            ),
+        )
 
     silence_watchdog_task = None
     if settings.AGENT_SILENCE_TIMEOUT_SECONDS and settings.AGENT_SILENCE_TIMEOUT_SECONDS > 0:

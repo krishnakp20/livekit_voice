@@ -25,6 +25,9 @@ class _CallUsage:
     llm_prompt_tokens: int = 0
     llm_completion_tokens: int = 0
     tts_chars: int = 0
+    # Per-1M-char TTS price for this call when it differs from the Cartesia default
+    # (e.g. Bodhi). None → settings.COST_TTS_PER_1M_CHARS.
+    tts_price_per_1m: float | None = None
     # Speech-to-speech (OpenAI Realtime) audio tokens — priced separately from the
     # text-LLM tokens above, so kept in their own bucket rather than mixed in.
     realtime_input_tokens: int = 0
@@ -55,7 +58,8 @@ async def persist_call_costs(call_id: int) -> None:
         usage.llm_prompt_tokens / 1_000_000 * settings.COST_LLM_INPUT_PER_1M
         + usage.llm_completion_tokens / 1_000_000 * settings.COST_LLM_OUTPUT_PER_1M
     )
-    tts_cost = usage.tts_chars / 1_000_000 * settings.COST_TTS_PER_1M_CHARS
+    tts_price = usage.tts_price_per_1m if usage.tts_price_per_1m is not None else settings.COST_TTS_PER_1M_CHARS
+    tts_cost = usage.tts_chars / 1_000_000 * tts_price
     realtime_cost = (
         usage.realtime_input_tokens / 1_000_000 * settings.COST_REALTIME_AUDIO_INPUT_PER_1M
         + usage.realtime_output_tokens / 1_000_000 * settings.COST_REALTIME_AUDIO_OUTPUT_PER_1M
@@ -449,11 +453,14 @@ async def _save_transcript(
     )
 
 
-def attach_call_listeners(session: AgentSession, call_id: int, client_id: int) -> None:
+def attach_call_listeners(
+    session: AgentSession, call_id: int, client_id: int, tts_price_per_1m: float | None = None
+) -> None:
     """Wire AgentSession events → MySQL transcripts + per-turn latency breakdown."""
     turn_no = {"n": 0}
     bucket: dict[str, _TurnBucket | None] = {"current": None}
     usage = _USAGE.setdefault(call_id, _CallUsage())
+    usage.tts_price_per_1m = tts_price_per_1m
 
     def _new_turn(user_text: str = "") -> _TurnBucket:
         b = _TurnBucket(user_text=user_text)
