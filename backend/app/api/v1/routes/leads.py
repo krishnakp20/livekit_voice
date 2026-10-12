@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import logging
 import re
 from datetime import datetime, timezone
 
@@ -8,10 +9,11 @@ from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 
 from app.core.deps import AdminUser, CurrentUser, DbSession, IngestClient
-from app.db.models.campaign import Campaign, Lead
+from app.db.models.campaign import Campaign, CampaignStatus, Lead
 from app.schemas.campaign import LeadCreate, LeadIngest, LeadResponse
 from app.services.campaign_dial_service import is_within_calling_window, next_window_start
 
+logger = logging.getLogger("vbots.leads")
 router = APIRouter()
 
 
@@ -127,6 +129,16 @@ async def ingest_lead(
             )
     else:
         raise HTTPException(status_code=400, detail="campaign_id or vicidial_list_id is required")
+
+    # A continuously drip-fed campaign (this endpoint) empties its NEW-lead queue
+    # between pushes, which auto-completes it (campaign_dial_service.dial_campaign_leads)
+    # — the dial loop then stops polling it entirely. Pushing a new lead in is itself
+    # the signal there's more work, so resume it automatically. A deliberately PAUSED
+    # campaign is left alone — that's an explicit admin action, not something a lead
+    # arriving should silently override.
+    if campaign.status == CampaignStatus.COMPLETED:
+        campaign.status = CampaignStatus.RUNNING
+        logger.info("Campaign %s auto-resumed (COMPLETED -> RUNNING) by lead ingest", campaign.id)
 
     # If it arrives outside the campaign's calling window, don't make it eligible
     # until the window opens — otherwise the very first dial-loop poll would try
