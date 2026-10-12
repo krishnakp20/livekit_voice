@@ -2,13 +2,15 @@ import csv
 import io
 import json
 import re
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 
-from app.core.deps import AdminUser, CurrentUser, DbSession
-from app.db.models.campaign import Lead
-from app.schemas.campaign import LeadCreate, LeadResponse
+from app.core.deps import AdminUser, CurrentUser, DbSession, IngestClient
+from app.db.models.campaign import Campaign, Lead
+from app.schemas.campaign import LeadCreate, LeadIngest, LeadResponse
+from app.services.campaign_dial_service import is_within_calling_window, next_window_start
 
 router = APIRouter()
 
@@ -82,6 +84,67 @@ async def list_leads(
 @router.post("", response_model=LeadResponse, status_code=status.HTTP_201_CREATED)
 async def create_lead(data: LeadCreate, db: DbSession, current_user: AdminUser):
     lead = Lead(client_id=current_user.client_id, **data.model_dump())
+    db.add(lead)
+    await db.flush()
+    await db.refresh(lead)
+    return lead
+
+
+@router.post("/ingest/{client_slug}", response_model=LeadResponse, status_code=status.HTTP_201_CREATED)
+async def ingest_lead(
+    client_slug: str,
+    data: LeadIngest,
+    db: DbSession,
+    client: IngestClient,
+):
+    """Push ONE lead in, from an external dialer (e.g. a script on the VICIdial
+    server watching vicidial_list for leads that failed the live-agent attempt).
+    Auth: X-Client-API-Key header, scoped to this client_slug — see
+    app.core.deps.verify_client_api_key. No user session involved."""
+    phone = _clean_phone(data.phone)
+    if phone is None:
+        raise HTTPException(status_code=400, detail="Invalid phone number")
+
+    campaign: Campaign | None = None
+    if data.campaign_id:
+        result = await db.execute(
+            select(Campaign).where(Campaign.id == data.campaign_id, Campaign.client_id == client.id)
+        )
+        campaign = result.scalar_one_or_none()
+        if not campaign:
+            raise HTTPException(status_code=404, detail="campaign_id not found for this client")
+    elif data.vicidial_list_id:
+        result = await db.execute(
+            select(Campaign).where(
+                Campaign.vicidial_list_id == data.vicidial_list_id, Campaign.client_id == client.id
+            )
+        )
+        campaign = result.scalar_one_or_none()
+        if not campaign:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No campaign found with vicidial_list_id={data.vicidial_list_id!r} for this client",
+            )
+    else:
+        raise HTTPException(status_code=400, detail="campaign_id or vicidial_list_id is required")
+
+    # If it arrives outside the campaign's calling window, don't make it eligible
+    # until the window opens — otherwise the very first dial-loop poll would try
+    # to call it immediately, e.g. a lead pushed at 10pm getting dialed at 10pm.
+    now = datetime.now(timezone.utc)
+    next_attempt_at = None
+    if not await is_within_calling_window(db, client.id, campaign, now):
+        next_attempt_at = await next_window_start(db, client.id, campaign, now)
+
+    lead = Lead(
+        client_id=client.id,
+        campaign_id=campaign.id,
+        phone=phone,
+        name=(data.name or "").strip() or None,
+        email=(data.email or "").strip() or None,
+        metadata_json=json.dumps(data.metadata, ensure_ascii=False) if data.metadata else None,
+        next_attempt_at=next_attempt_at,
+    )
     db.add(lead)
     await db.flush()
     await db.refresh(lead)

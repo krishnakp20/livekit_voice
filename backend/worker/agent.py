@@ -1002,20 +1002,17 @@ async def finalize_call_log(
                         lead.status = LeadStatus.CONNECTED
                         logger.info("Lead %s → CONNECTED (call_id=%s duration=%ss)", lead.id, call.id, call.duration_seconds)
                     else:
-                        lead.retry_count += 1
-                        max_retries = 3
+                        from app.services.campaign_dial_service import compute_lead_retry_update
+
+                        camp = None
                         if lead.campaign_id:
                             camp_result = await db.execute(select(Campaign).where(Campaign.id == lead.campaign_id))
                             camp = camp_result.scalar_one_or_none()
-                            if camp:
-                                max_retries = camp.max_retries
-
-                        if lead.retry_count >= max_retries:
-                            lead.status = LeadStatus.NO_ANSWER if not failed else LeadStatus.FAILED
-                            logger.info("Lead %s → %s (retries=%s/%s)", lead.id, lead.status, lead.retry_count, max_retries)
-                        else:
-                            lead.status = LeadStatus.NEW  # back to NEW for retry
-                            logger.info("Lead %s → NEW for retry (attempt %s/%s)", lead.id, lead.retry_count, max_retries)
+                        # Logs its own "Lead N -> ..." line; mutates lead.status/retry_count/
+                        # next_attempt_at/day_count/attempts_today in place. Same function the
+                        # dial-selection query's eligibility check is built around, so the two
+                        # can never disagree about what "ready to call again" means.
+                        await compute_lead_retry_update(db, lead, camp, now, failed)
 
             await db.commit()
 

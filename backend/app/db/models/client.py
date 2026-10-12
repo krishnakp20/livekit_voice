@@ -30,6 +30,11 @@ class Client(Base):
     timezone: Mapped[str] = mapped_column(String(50), default="Asia/Kolkata")
     logo_url: Mapped[Optional[str]] = mapped_column(String(500))
     settings_json: Mapped[Optional[str]] = mapped_column(Text)
+    # Bcrypt hash of this client's lead-ingestion API key (see POST /leads/ingest).
+    # NULL = ingestion disabled for this client. The raw key is shown once at
+    # generation time and never stored — only the hash, verified via
+    # app.core.security.verify_password, same as user login passwords.
+    api_key_hash: Mapped[Optional[str]] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

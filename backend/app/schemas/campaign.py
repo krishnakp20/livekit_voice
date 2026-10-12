@@ -38,6 +38,19 @@ class LeadCreate(BaseModel):
     metadata_json: Optional[str] = None
 
 
+class LeadIngest(BaseModel):
+    """Single-lead push from an external dialer (e.g. VICIdial) — see
+    POST /leads/ingest/{client_slug}. Either campaign_id or vicidial_list_id must
+    be given; vicidial_list_id is resolved against Campaign.vicidial_list_id so the
+    pushing script doesn't need to know VBots' internal campaign id."""
+    phone: str
+    name: Optional[str] = None
+    email: Optional[str] = None
+    campaign_id: Optional[int] = None
+    vicidial_list_id: Optional[str] = None
+    metadata: Optional[dict] = None
+
+
 class LeadResponse(BaseModel):
     id: int
     client_id: int
