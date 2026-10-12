@@ -187,7 +187,9 @@ async def dial_campaign_leads(
             db.add(call)
             await db.flush()
 
-            await livekit_service.dial_participant(room_name, dial_to, trunk_id)
+            await livekit_service.dial_participant(
+                room_name, dial_to, trunk_id, identity_number=phone
+            )
             lead.status = LeadStatus.DIALING
             dialed += 1
             logger.info(

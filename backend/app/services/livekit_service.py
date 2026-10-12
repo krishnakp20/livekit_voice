@@ -204,13 +204,23 @@ class LiveKitService:
         room_name: str,
         phone_number: str,
         trunk_id: str,
+        identity_number: Optional[str] = None,
     ) -> str:
-        """Outbound dial via SIP."""
+        """Outbound dial via SIP.
+
+        phone_number: the actual SIP dial destination (sip_call_to) — may carry a
+            per-agent dial_prefix tag (see AIAgent.dial_prefix) for carrier routing.
+        identity_number: the real, untagged number to derive participant_identity
+            from. Defaults to phone_number. MUST match what the worker computes
+            from the room name / CallLog, or it will never recognize this SIP
+            participant as the expected one and the call will connect on the PSTN
+            side while the agent sits waiting forever (silent/dead call).
+        """
         request = api.CreateSIPParticipantRequest(
             sip_trunk_id=trunk_id,
             sip_call_to=phone_number,
             room_name=room_name,
-            participant_identity=sip_participant_identity(phone_number),
+            participant_identity=sip_participant_identity(identity_number or phone_number),
         )
         result = await self.lkapi.sip.create_sip_participant(request)
         return result.participant_id
