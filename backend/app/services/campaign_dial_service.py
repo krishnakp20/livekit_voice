@@ -147,6 +147,11 @@ async def dial_campaign_leads(
 
         phone = format_phone_for_sip(lead.phone)
         safe_phone = re.sub(r"\D", "", phone)
+        # dial_to carries the agent's dial_prefix tag (if any) for the live SIP leg only —
+        # safe_phone/room_name/CallLog below stay on the real +91 number untouched.
+        dial_to = phone
+        if agent and agent.dial_prefix:
+            dial_to = f"+{agent.dial_prefix}{phone[3:]}"
 
         if safe_phone in seen_phones:
             logger.warning(
@@ -182,7 +187,7 @@ async def dial_campaign_leads(
             db.add(call)
             await db.flush()
 
-            await livekit_service.dial_participant(room_name, phone, trunk_id)
+            await livekit_service.dial_participant(room_name, dial_to, trunk_id)
             lead.status = LeadStatus.DIALING
             dialed += 1
             logger.info(

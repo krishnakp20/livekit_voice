@@ -80,6 +80,17 @@ class AIAgent(Base):
     tts_provider: Mapped[Optional[str]] = mapped_column(String(20))   # "cartesia" | "sarvam" | "elevenlabs" | "bodhi"
     tts_api_key: Mapped[Optional[str]] = mapped_column(Text)
 
+    # Outbound-dial routing marker (OUTBOUND agents only — read by campaign_dial_service,
+    # which only ever looks at the agent on Campaign.agent_id, so an inbound agent's row
+    # is simply never consulted). NULL = dial as the real +91 number (default). If set
+    # (e.g. "81", "712"), the campaign dialer dials "+<dial_prefix><10-digit-number>"
+    # instead — a fake country-code tag consumed entirely by Asterisk's own dialplan,
+    # which strips the tag and routes to that client's carrier. CallLog/CRM data is
+    # unaffected; only the live SIP INVITE destination carries the tag. Add a new
+    # client's carrier by setting this field + a matching _+<dial_prefix>X. pattern in
+    # extensions.conf — no code change needed.
+    dial_prefix: Mapped[Optional[str]] = mapped_column(String(5))
+
     # LiveKit
     livekit_agent_id: Mapped[Optional[str]] = mapped_column(String(255))
 
